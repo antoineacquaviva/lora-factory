@@ -1,0 +1,10 @@
+models/*.safetensors
+originals/*
+dataset/*
+training.log
+training.pid
+flask.log
+kill_switch.log
+__pycache__/
+*.pyc
+*.zip

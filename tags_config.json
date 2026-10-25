@@ -1,0 +1,37 @@
+{
+  "Support & Nature (Objet)": [
+    {"fr": "Sculpture 3D", "en": "3d statue sculpture"},
+    {"fr": "Bas-relief", "en": "bas-relief carving"},
+    {"fr": "Bijou / Orfèvrerie", "en": "jewelry piece, macro photography"},
+    {"fr": "Poterie / Céramique", "en": "ceramic pottery vessel"},
+    {"fr": "Peinture 2D", "en": "flat 2d painting illustration"},
+    {"fr": "Tissu / Tapisserie", "en": "woven textile tapestry"},
+    {"fr": "Gravure / Symbole", "en": "engraved symbol pattern"},
+    {"fr": "Masque", "en": "carved mask"}
+  ],
+  "Matériau & Texture (À dissocier)": [
+    {"fr": "Pierre brute", "en": "rough stone texture"},
+    {"fr": "Bois sculpté", "en": "carved wood grain texture"},
+    {"fr": "Terre cuite", "en": "terracotta clay texture"},
+    {"fr": "Or / Doré", "en": "metallic gold surface"},
+    {"fr": "Argent / Métal", "en": "brushed silver metal"},
+    {"fr": "Bronze patiné", "en": "aged patina bronze"},
+    {"fr": "Toile peinte", "en": "canvas texture, visible brushstrokes"},
+    {"fr": "Papier / Parchemin", "en": "aged parchment paper background"}
+  ],
+  "Cadrage & Prise de vue": [
+    {"fr": "Vue d'ensemble", "en": "full shot"},
+    {"fr": "Plan rapproché", "en": "close-up shot"},
+    {"fr": "Macro / Détail", "en": "extreme macro detail"},
+    {"fr": "Vue de face", "en": "front view, symmetrical"},
+    {"fr": "Vue de trois-quarts", "en": "three-quarter view"}
+  ],
+  "Arrière-plan & Lumière": [
+    {"fr": "Fond neutre / Studio", "en": "neutral studio background"},
+    {"fr": "Fond noir", "en": "solid black background"},
+    {"fr": "Fond blanc", "en": "isolated on white background"},
+    {"fr": "Flou (Bokeh)", "en": "blurred depth of field background"},
+    {"fr": "Éclairage musée", "en": "dramatic museum lighting"},
+    {"fr": "Lumière naturelle", "en": "soft natural daylight"}
+  ]
+}

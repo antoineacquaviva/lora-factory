@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoRA Factory Studio — OCI</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header class="topbar">
+        <div class="brand">
+            <span class="logo-dot"></span>
+            <h1>LoRA Factory <span>Studio d'Entraînement SDXL (OCI)</span></h1>
+        </div>
+        <div class="status-zone">
+            <span id="statusBadge" class="badge idle">VEILLE / PRÊT</span>
+            <button class="btn danger sm" onclick="emergencyKill()">🛑 Kill Switch GPU</button>
+        </div>
+    </header>
+
+    <main class="main-layout">
+        <!-- Colonne Gauche : Contrôles -->
+        <aside class="sidebar">
+            <section class="card">
+                <h2>1. Importation d'images</h2>
+                <input type="file" id="fileInput" multiple accept="image/*,.txt">
+                <button class="btn primary full" onclick="uploadFiles()">📥 Importer dans le Studio</button>
+            </section>
+
+            <section class="card">
+                <h2>2. Réglages d'itération LoRA</h2>
+                <label>Mot-clé déclencheur (Trigger Word)</label>
+                <input type="text" id="triggerWord" value="culturax_style">
+
+                <div class="row-2">
+                    <div>
+                        <label>Steps</label>
+                        <input type="number" id="stepsInput" value="1200" step="100">
+                    </div>
+                    <div>
+                        <label>Network Dim</label>
+                        <select id="dimInput">
+                            <option value="16">16 (Léger)</option>
+                            <option value="32" selected>32 (Standard)</option>
+                            <option value="64">64 (Dense)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <label>Vitesse d'apprentissage (Learning Rate)</label>
+                <select id="lrInput">
+                    <option value="2e-4">2e-4 (Fort / Rapide)</option>
+                    <option value="1e-4" selected>1e-4 (Équilibré)</option>
+                    <option value="5e-5">5e-5 (Subtil / Doux)</option>
+                </select>
+
+                <button id="trainBtn" class="btn accent full" onclick="startTraining()">🚀 Lancer l'entraînement GPU (~1,80 €)</button>
+            </section>
+
+            <section class="card">
+                <h2>3. Modèles générés (.safetensors)</h2>
+                <div id="modelsList" class="models-list">Chargement...</div>
+            </section>
+        </aside>
+
+        <!-- Zone Centrale : Grille & Logs -->
+        <section class="workspace">
+            <div class="card">
+                <div class="toolbar">
+                    <div>
+                        <h2>Lot d'entraînement (<span id="imgCount">0</span> images)</h2>
+                        <p class="subtitle">Cliquez sur une vignette pour ouvrir la <strong>Table Lumineuse (Recadrage SDXL + Puces de Tags Bilingues)</strong>.</p>
+                    </div>
+                    <div class="batch-actions">
+                        <button class="btn secondary sm" onclick="selectAll(true)">Tout cocher</button>
+                        <button class="btn secondary sm" onclick="selectAll(false)">Tout décocher</button>
+                        <select id="batchTagSelect" class="sm-select"></select>
+                        <button class="btn primary sm" onclick="applyBatchTag('add')">+ Tag sélection</button>
+                        <button class="btn secondary sm" onclick="applyBatchTag('remove')">- Retirer</button>
+                    </div>
+                </div>
+
+                <div id="datasetGrid" class="dataset-grid"></div>
+            </div>
+
+            <div class="card">
+                <div class="toolbar">
+                    <h2>Console d'orchestration OCI & Logs GPU en direct</h2>
+                    <button class="btn secondary sm" onclick="pollLogs()">🔄 Rafraîchir</button>
+                </div>
+                <pre id="logsBox">En attente de lancement...</pre>
+            </div>
+        </section>
+    </main>
+
+    <!-- MODALE STUDIO PLEIN ÉCRAN (Recadrage + Constructeur de Tags) -->
+    <div id="studioModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="nav-title">
+                    <button class="btn secondary sm" onclick="navigateModal(-1)">⬅️ Préc. (Flèche G)</button>
+                    <span id="modalTitle" class="modal-filename">image.jpg</span>
+                    <span id="modalDims" class="dim-pill">1024×1024</span>
+                    <button class="btn secondary sm" onclick="navigateModal(1)">Suiv. (Flèche D) ➡️</button>
+                </div>
+                <button class="btn danger sm" onclick="closeModal()">✕ Fermer (Échap)</button>
+            </div>
+
+            <div class="modal-body">
+                <!-- Panneau Gauche : Cropper -->
+                <div class="crop-panel">
+                    <div class="crop-toolbar">
+                        <span class="toolbar-label">Ratios SDXL :</span>
+                        <button class="btn secondary sm active-ratio" id="btnRatioSq" onclick="setRatio(1, 1024, 1024, this)">⬛ Carré 1024×1024</button>
+                        <button class="btn secondary sm" id="btnRatioPort" onclick="setRatio(832/1216, 832, 1216, this)">📱 Portrait 832×1216</button>
+                        <button class="btn secondary sm" id="btnRatioLand" onclick="setRatio(1216/832, 1216, 832, this)">🖼️ Paysage 1216×832</button>
+                    </div>
+
+                    <div class="crop-canvas-wrapper">
+                        <img id="cropImage" src="" alt="Crop target">
+                    </div>
+
+                    <div class="crop-actions">
+                        <button class="btn primary" onclick="executeCrop('replace')">✂️ Recadrer et remplacer cette image</button>
+                        <button class="btn accent" onclick="executeCrop('extract')">➕ Extraire comme nouvelle image (Détail)</button>
+                        <button class="btn secondary" onclick="resetOriginal()">🔄 Réinitialiser l'original brut</button>
+                    </div>
+                </div>
+
+                <!-- Panneau Droit : Tag Builder Bilingue -->
+                <div class="tag-panel">
+                    <div class="tag-header-row">
+                        <h3>Constructeur d'étiquettes (FR ➡️ EN)</h3>
+                        <button class="btn secondary sm" onclick="copyPrevCaption()">📋 Copier légende précédente</button>
+                    </div>
+                    <p class="help-text">Cliquez sur les puces en français pour décrire le <strong>support matériel</strong> et le <strong>fond</strong> (afin que l'IA les dissocie du style culturel).</p>
+
+                    <div id="pillsContainer" class="pills-container"></div>
+
+                    <div class="custom-tag-box">
+                        <input type="text" id="customFr" placeholder="Nom FR (ex: Ivoire)">
+                        <input type="text" id="customEn" placeholder="Tag EN (ex: carved ivory texture)">
+                        <button class="btn secondary sm" onclick="addCustomTag()">+ Créer puce</button>
+                    </div>
+
+                    <label class="final-label">Fichier <code>.txt</code> final envoyé à Stable Diffusion XL (sauvegarde auto) :</label>
+                    <textarea id="modalCaption" rows="3" oninput="onModalCaptionInput()"></textarea>
+                    <div id="saveIndicator" class="save-indicator">✓ Sauvegardé</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
+    <script src="/static/js/studio.js"></script>
+</body>
+</html>
