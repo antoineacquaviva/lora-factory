@@ -1,37 +1,41 @@
 {
-  "Support & Nature (Objet)": [
-    {"fr": "Sculpture 3D", "en": "3d statue sculpture"},
-    {"fr": "Bas-relief", "en": "bas-relief carving"},
-    {"fr": "Bijou / Orfèvrerie", "en": "jewelry piece, macro photography"},
-    {"fr": "Poterie / Céramique", "en": "ceramic pottery vessel"},
-    {"fr": "Peinture 2D", "en": "flat 2d painting illustration"},
-    {"fr": "Tissu / Tapisserie", "en": "woven textile tapestry"},
-    {"fr": "Gravure / Symbole", "en": "engraved symbol pattern"},
-    {"fr": "Masque", "en": "carved mask"}
+  "1. Sujet & Support (Quoi ?)": [
+    {"fr": "Sculpture / Statue", "en": "3d carved statue sculpture"},
+    {"fr": "Masque sculpté", "en": "carved wooden mask"},
+    {"fr": "Portrait / Personne", "en": "portrait of a person, human face"},
+    {"fr": "Maquillage / Peinture corporelle", "en": "face paint, body painting, skin texture"},
+    {"fr": "Bijou / Parure", "en": "jewelry piece, necklace, wearable ornament"},
+    {"fr": "Peinture / Toile", "en": "2d painting illustration"},
+    {"fr": "Symbole / Tracé graphique", "en": "flat graphic symbol, 2d icon"},
+    {"fr": "Objet décoré / Artisanat", "en": "decorated handcrafted object, utilitarian artifact"},
+    {"fr": "Poterie / Récipient", "en": "ceramic vessel, container"}
   ],
-  "Matériau & Texture (À dissocier)": [
-    {"fr": "Pierre brute", "en": "rough stone texture"},
-    {"fr": "Bois sculpté", "en": "carved wood grain texture"},
-    {"fr": "Terre cuite", "en": "terracotta clay texture"},
-    {"fr": "Or / Doré", "en": "metallic gold surface"},
-    {"fr": "Argent / Métal", "en": "brushed silver metal"},
-    {"fr": "Bronze patiné", "en": "aged patina bronze"},
-    {"fr": "Toile peinte", "en": "canvas texture, visible brushstrokes"},
-    {"fr": "Papier / Parchemin", "en": "aged parchment paper background"}
+  "2. Matériau & Technique (À dissocier du style)": [
+    {"fr": "Bois sculpté (clair/brut)", "en": "carved natural wood, wood grain texture"},
+    {"fr": "Bois sombre / patiné", "en": "dark polished wood, aged wooden surface"},
+    {"fr": "Perles (tissées / assemblées)", "en": "beaded, tiny colorful glass beads, beadwork texture"},
+    {"fr": "Tracé noir (Encre / Vectoriel)", "en": "black ink line art, monochrome black drawing"},
+    {"fr": "Peinture acrylique / pigments", "en": "painted surface, matte natural pigments, brushstrokes"},
+    {"fr": "Peau humaine", "en": "natural human skin, pores, facial features"},
+    {"fr": "Fibres végétales / Raphia", "en": "woven plant fibers, raffia, straw texture"},
+    {"fr": "Coquillages / Cauris", "en": "cowrie shells, natural shell ornaments"},
+    {"fr": "Terre cuite / Argile", "en": "terracotta clay surface"},
+    {"fr": "Métal / Laiton / Bronze", "en": "metallic surface, brass or bronze"}
   ],
-  "Cadrage & Prise de vue": [
-    {"fr": "Vue d'ensemble", "en": "full shot"},
-    {"fr": "Plan rapproché", "en": "close-up shot"},
-    {"fr": "Macro / Détail", "en": "extreme macro detail"},
-    {"fr": "Vue de face", "en": "front view, symmetrical"},
-    {"fr": "Vue de trois-quarts", "en": "three-quarter view"}
+  "3. Cadrage & Prise de vue": [
+    {"fr": "Objet entier (Vue globale)", "en": "full shot, entire object visible"},
+    {"fr": "Portrait (Buste / Visage)", "en": "close-up portrait, head and shoulders"},
+    {"fr": "Gros plan / Détail (Macro)", "en": "extreme close-up, macro texture detail"},
+    {"fr": "Vue de face (Symétrique)", "en": "front view, centered, symmetrical"},
+    {"fr": "Vue de profil / Trois-quarts", "en": "three-quarter view, angled perspective"},
+    {"fr": "À plat (Vue du dessus)", "en": "flat lay, top-down view"}
   ],
-  "Arrière-plan & Lumière": [
-    {"fr": "Fond neutre / Studio", "en": "neutral studio background"},
-    {"fr": "Fond noir", "en": "solid black background"},
-    {"fr": "Fond blanc", "en": "isolated on white background"},
-    {"fr": "Flou (Bokeh)", "en": "blurred depth of field background"},
-    {"fr": "Éclairage musée", "en": "dramatic museum lighting"},
-    {"fr": "Lumière naturelle", "en": "soft natural daylight"}
+  "4. Fond & Éclairage": [
+    {"fr": "Fond blanc pur (Isolé)", "en": "isolated on pure white background"},
+    {"fr": "Fond noir (Musée / Studio)", "en": "solid black background, studio lighting"},
+    {"fr": "Fond neutre / Gris", "en": "neutral grey background"},
+    {"fr": "Fond flou (Extérieur / Nature)", "en": "blurred natural background, depth of field, bokeh"},
+    {"fr": "Lumière naturelle / Soleil", "en": "natural outdoor daylight"},
+    {"fr": "Éclairage dramatique / Ombre", "en": "dramatic directional lighting, strong shadows"}
   ]
 }
