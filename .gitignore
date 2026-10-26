@@ -8,3 +8,6 @@ kill_switch.log
 __pycache__/
 *.pyc
 *.zip
+
+.env
+.gemini_key

@@ -1,41 +1,184 @@
 {
-  "1. Sujet & Support (Quoi ?)": [
-    {"fr": "Sculpture / Statue", "en": "3d carved statue sculpture"},
-    {"fr": "Masque sculpté", "en": "carved wooden mask"},
-    {"fr": "Portrait / Personne", "en": "portrait of a person, human face"},
-    {"fr": "Maquillage / Peinture corporelle", "en": "face paint, body painting, skin texture"},
-    {"fr": "Bijou / Parure", "en": "jewelry piece, necklace, wearable ornament"},
-    {"fr": "Peinture / Toile", "en": "2d painting illustration"},
-    {"fr": "Symbole / Tracé graphique", "en": "flat graphic symbol, 2d icon"},
-    {"fr": "Objet décoré / Artisanat", "en": "decorated handcrafted object, utilitarian artifact"},
-    {"fr": "Poterie / Récipient", "en": "ceramic vessel, container"}
+  "1. Support & Médium (Le Contenant)": [
+    {
+      "fr": "Sculpture / Statue 3D",
+      "en": "3d carved statue sculpture"
+    },
+    {
+      "fr": "Masque sculpté",
+      "en": "carved wooden mask"
+    },
+    {
+      "fr": "Portrait / Personne réelle",
+      "en": "portrait of a person, human face"
+    },
+    {
+      "fr": "Maquillage / Peinture corporelle",
+      "en": "face paint, body painting, skin texture"
+    },
+    {
+      "fr": "Bijou / Parure / Collier",
+      "en": "jewelry piece, necklace, wearable ornament"
+    },
+    {
+      "fr": "Peinture / Toile 2D",
+      "en": "2d painting illustration"
+    },
+    {
+      "fr": "Symbole / Tracé graphique",
+      "en": "flat graphic symbol, 2d icon"
+    },
+    {
+      "fr": "Objet décoré / Artisanat",
+      "en": "decorated handcrafted object, utilitarian artifact"
+    },
+    {
+      "fr": "Poterie / Récipient",
+      "en": "ceramic vessel, container"
+    }
   ],
-  "2. Matériau & Technique (À dissocier du style)": [
-    {"fr": "Bois sculpté (clair/brut)", "en": "carved natural wood, wood grain texture"},
-    {"fr": "Bois sombre / patiné", "en": "dark polished wood, aged wooden surface"},
-    {"fr": "Perles (tissées / assemblées)", "en": "beaded, tiny colorful glass beads, beadwork texture"},
-    {"fr": "Tracé noir (Encre / Vectoriel)", "en": "black ink line art, monochrome black drawing"},
-    {"fr": "Peinture acrylique / pigments", "en": "painted surface, matte natural pigments, brushstrokes"},
-    {"fr": "Peau humaine", "en": "natural human skin, pores, facial features"},
-    {"fr": "Fibres végétales / Raphia", "en": "woven plant fibers, raffia, straw texture"},
-    {"fr": "Coquillages / Cauris", "en": "cowrie shells, natural shell ornaments"},
-    {"fr": "Terre cuite / Argile", "en": "terracotta clay surface"},
-    {"fr": "Métal / Laiton / Bronze", "en": "metallic surface, brass or bronze"}
+  "2. Sujets & Motifs Figuratifs (Le Contenu à dissocier)": [
+    {
+      "fr": "Figure humaine / Personnage",
+      "en": "human figure, stylized character"
+    },
+    {
+      "fr": "Visage / Tête",
+      "en": "stylized face, head"
+    },
+    {
+      "fr": "Femme",
+      "en": "woman, female figure"
+    },
+    {
+      "fr": "Homme / Guerrier",
+      "en": "man, male figure, warrior"
+    },
+    {
+      "fr": "Oiseau",
+      "en": "bird figure, avian motif"
+    },
+    {
+      "fr": "Félin / Chat / Léopard",
+      "en": "feline figure, cat or leopard motif"
+    },
+    {
+      "fr": "Reptile / Serpent / Lézard",
+      "en": "reptile figure, snake or lizard motif"
+    },
+    {
+      "fr": "Poisson / Créature aquatique",
+      "en": "fish figure, aquatic motif"
+    },
+    {
+      "fr": "Cornes / Coiffe cornue",
+      "en": "horns, horned headdress"
+    },
+    {
+      "fr": "Couronne / Coiffe / Chapeau",
+      "en": "traditional headdress, crown, headwear"
+    },
+    {
+      "fr": "Arbre / Végétal / Feuillage",
+      "en": "tree motif, botanical plant elements"
+    },
+    {
+      "fr": "Soleil / Astre",
+      "en": "sun symbol, celestial motif"
+    }
   ],
-  "3. Cadrage & Prise de vue": [
-    {"fr": "Objet entier (Vue globale)", "en": "full shot, entire object visible"},
-    {"fr": "Portrait (Buste / Visage)", "en": "close-up portrait, head and shoulders"},
-    {"fr": "Gros plan / Détail (Macro)", "en": "extreme close-up, macro texture detail"},
-    {"fr": "Vue de face (Symétrique)", "en": "front view, centered, symmetrical"},
-    {"fr": "Vue de profil / Trois-quarts", "en": "three-quarter view, angled perspective"},
-    {"fr": "À plat (Vue du dessus)", "en": "flat lay, top-down view"}
+  "3. Matériau & Texture (À dissocier du style)": [
+    {
+      "fr": "Bois sculpté (clair/brut)",
+      "en": "carved natural wood, wood grain texture"
+    },
+    {
+      "fr": "Bois sombre / patiné",
+      "en": "dark polished wood, aged wooden surface"
+    },
+    {
+      "fr": "Perles (tissées / assemblées)",
+      "en": "beaded, tiny colorful glass beads, beadwork texture"
+    },
+    {
+      "fr": "Tracé noir (Encre / Vectoriel)",
+      "en": "black ink line art, monochrome black drawing"
+    },
+    {
+      "fr": "Peinture acrylique / pigments",
+      "en": "painted surface, matte natural pigments, brushstrokes"
+    },
+    {
+      "fr": "Peau humaine",
+      "en": "natural human skin, pores, facial features"
+    },
+    {
+      "fr": "Fibres végétales / Raphia",
+      "en": "woven plant fibers, raffia, straw texture"
+    },
+    {
+      "fr": "Coquillages / Cauris",
+      "en": "cowrie shells, natural shell ornaments"
+    },
+    {
+      "fr": "Terre cuite / Argile",
+      "en": "terracotta clay surface"
+    },
+    {
+      "fr": "Métal / Laiton / Bronze",
+      "en": "metallic surface, brass or bronze"
+    }
   ],
-  "4. Fond & Éclairage": [
-    {"fr": "Fond blanc pur (Isolé)", "en": "isolated on pure white background"},
-    {"fr": "Fond noir (Musée / Studio)", "en": "solid black background, studio lighting"},
-    {"fr": "Fond neutre / Gris", "en": "neutral grey background"},
-    {"fr": "Fond flou (Extérieur / Nature)", "en": "blurred natural background, depth of field, bokeh"},
-    {"fr": "Lumière naturelle / Soleil", "en": "natural outdoor daylight"},
-    {"fr": "Éclairage dramatique / Ombre", "en": "dramatic directional lighting, strong shadows"}
+  "4. Cadrage & Prise de vue": [
+    {
+      "fr": "Objet entier (Vue globale)",
+      "en": "full shot, entire object visible"
+    },
+    {
+      "fr": "Portrait (Buste / Visage)",
+      "en": "close-up portrait, head and shoulders"
+    },
+    {
+      "fr": "Gros plan / Détail (Macro)",
+      "en": "extreme close-up, macro texture detail"
+    },
+    {
+      "fr": "Vue de face (Symétrique)",
+      "en": "front view, centered, symmetrical"
+    },
+    {
+      "fr": "Vue de profil / Trois-quarts",
+      "en": "three-quarter view, angled perspective"
+    },
+    {
+      "fr": "À plat (Vue du dessus)",
+      "en": "flat lay, top-down view"
+    }
+  ],
+  "5. Fond & Éclairage": [
+    {
+      "fr": "Fond blanc pur (Isolé)",
+      "en": "isolated on pure white background"
+    },
+    {
+      "fr": "Fond noir (Musée / Studio)",
+      "en": "solid black background, studio lighting"
+    },
+    {
+      "fr": "Fond neutre / Gris",
+      "en": "neutral grey background"
+    },
+    {
+      "fr": "Fond flou (Extérieur / Nature)",
+      "en": "blurred natural background, depth of field, bokeh"
+    },
+    {
+      "fr": "Lumière naturelle / Soleil",
+      "en": "natural outdoor daylight"
+    },
+    {
+      "fr": "Éclairage dramatique / Ombre",
+      "en": "dramatic directional lighting, strong shadows"
+    }
   ]
 }

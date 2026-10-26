@@ -1,36 +1,36 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="fr">
-<head>
+<head><base href="/lora/">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LoRA Factory Studio — OCI</title>
+    <title>LoRA Factory Studio â€” OCI</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="static/css/style.css">
 </head>
 <body>
     <header class="topbar">
         <div class="brand">
             <span class="logo-dot"></span>
-            <h1>LoRA Factory <span>Studio d'Entraînement SDXL (OCI)</span></h1>
+            <h1>LoRA Factory <span>Studio d'EntraÃ®nement SDXL (OCI)</span></h1>
         </div>
         <div class="status-zone">
-            <span id="statusBadge" class="badge idle">VEILLE / PRÊT</span>
-            <button class="btn danger sm" onclick="emergencyKill()">🛑 Kill Switch GPU</button>
+            <span id="statusBadge" class="badge idle">VEILLE / PRÃŠT</span>
+            <button class="btn danger sm" onclick="emergencyKill()">ðŸ›‘ Kill Switch GPU</button>
         </div>
     </header>
 
     <main class="main-layout">
-        <!-- Colonne Gauche : Contrôles -->
+        <!-- Colonne Gauche : ContrÃ´les -->
         <aside class="sidebar">
             <section class="card">
                 <h2>1. Importation d'images</h2>
                 <input type="file" id="fileInput" multiple accept="image/*,.txt">
-                <button class="btn primary full" onclick="uploadFiles()">📥 Importer dans le Studio</button>
+                <button class="btn primary full" onclick="uploadFiles()">ðŸ“¥ Importer dans le Studio</button>
             </section>
 
             <section class="card">
-                <h2>2. Réglages d'itération LoRA</h2>
-                <label>Mot-clé déclencheur (Trigger Word)</label>
+                <h2>2. RÃ©glages d'itÃ©ration LoRA</h2>
+                <label>Mot-clÃ© dÃ©clencheur (Trigger Word)</label>
                 <input type="text" id="triggerWord" value="culturax_style">
 
                 <div class="row-2">
@@ -41,7 +41,7 @@
                     <div>
                         <label>Network Dim</label>
                         <select id="dimInput">
-                            <option value="16">16 (Léger)</option>
+                            <option value="16">16 (LÃ©ger)</option>
                             <option value="32" selected>32 (Standard)</option>
                             <option value="64">64 (Dense)</option>
                         </select>
@@ -51,15 +51,15 @@
                 <label>Vitesse d'apprentissage (Learning Rate)</label>
                 <select id="lrInput">
                     <option value="2e-4">2e-4 (Fort / Rapide)</option>
-                    <option value="1e-4" selected>1e-4 (Équilibré)</option>
+                    <option value="1e-4" selected>1e-4 (Ã‰quilibrÃ©)</option>
                     <option value="5e-5">5e-5 (Subtil / Doux)</option>
                 </select>
 
-                <button id="trainBtn" class="btn accent full" onclick="startTraining()">🚀 Lancer l'entraînement GPU (~1,80 €)</button>
+                <button id="trainBtn" class="btn accent full" onclick="startTraining()">ðŸš€ Lancer l'entraÃ®nement GPU (~1,80 â‚¬)</button>
             </section>
 
             <section class="card">
-                <h2>3. Modèles générés (.safetensors)</h2>
+                <h2>3. ModÃ¨les gÃ©nÃ©rÃ©s (.safetensors)</h2>
                 <div id="modelsList" class="models-list">Chargement...</div>
             </section>
         </aside>
@@ -69,14 +69,14 @@
             <div class="card">
                 <div class="toolbar">
                     <div>
-                        <h2>Lot d'entraînement (<span id="imgCount">0</span> images)</h2>
-                        <p class="subtitle">Cliquez sur une vignette pour ouvrir la <strong>Table Lumineuse (Recadrage SDXL + Puces de Tags Bilingues)</strong>.</p>
+                        <h2>Lot d'entraÃ®nement (<span id="imgCount">0</span> images)</h2>
+                        <p class="subtitle">Cliquez sur une vignette pour ouvrir la <strong>Table Lumineuse (Recadrage SDXL + Puces + Copilote IA)</strong>.</p>
                     </div>
                     <div class="batch-actions">
                         <button class="btn secondary sm" onclick="selectAll(true)">Tout cocher</button>
-                        <button class="btn secondary sm" onclick="selectAll(false)">Tout décocher</button>
+                        <button class="btn secondary sm" onclick="selectAll(false)">Tout dÃ©cocher</button>
                         <select id="batchTagSelect" class="sm-select"></select>
-                        <button class="btn primary sm" onclick="applyBatchTag('add')">+ Tag sélection</button>
+                        <button class="btn primary sm" onclick="applyBatchTag('add')">+ Tag sÃ©lection</button>
                         <button class="btn secondary sm" onclick="applyBatchTag('remove')">- Retirer</button>
                     </div>
                 </div>
@@ -87,24 +87,24 @@
             <div class="card">
                 <div class="toolbar">
                     <h2>Console d'orchestration OCI & Logs GPU en direct</h2>
-                    <button class="btn secondary sm" onclick="pollLogs()">🔄 Rafraîchir</button>
+                    <button class="btn secondary sm" onclick="pollLogs()">ðŸ”„ RafraÃ®chir</button>
                 </div>
                 <pre id="logsBox">En attente de lancement...</pre>
             </div>
         </section>
     </main>
 
-    <!-- MODALE STUDIO PLEIN ÉCRAN (Recadrage + Constructeur de Tags) -->
+    <!-- MODALE STUDIO PLEIN Ã‰CRAN (Recadrage + Constructeur de Tags + Copilote IA) -->
     <div id="studioModal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
                 <div class="nav-title">
-                    <button class="btn secondary sm" onclick="navigateModal(-1)">⬅️ Préc. (Flèche G)</button>
+                    <button class="btn secondary sm" onclick="navigateModal(-1)">â¬…ï¸ PrÃ©c. (FlÃ¨che G)</button>
                     <span id="modalTitle" class="modal-filename">image.jpg</span>
-                    <span id="modalDims" class="dim-pill">1024×1024</span>
-                    <button class="btn secondary sm" onclick="navigateModal(1)">Suiv. (Flèche D) ➡️</button>
+                    <span id="modalDims" class="dim-pill">1024Ã—1024</span>
+                    <button class="btn secondary sm" onclick="navigateModal(1)">Suiv. (FlÃ¨che D) âž¡ï¸</button>
                 </div>
-                <button class="btn danger sm" onclick="closeModal()">✕ Fermer (Échap)</button>
+                <button class="btn danger sm" onclick="closeModal()">âœ• Fermer (Ã‰chap)</button>
             </div>
 
             <div class="modal-body">
@@ -112,9 +112,9 @@
                 <div class="crop-panel">
                     <div class="crop-toolbar">
                         <span class="toolbar-label">Ratios SDXL :</span>
-                        <button class="btn secondary sm active-ratio" id="btnRatioSq" onclick="setRatio(1, 1024, 1024, this)">⬛ Carré 1024×1024</button>
-                        <button class="btn secondary sm" id="btnRatioPort" onclick="setRatio(832/1216, 832, 1216, this)">📱 Portrait 832×1216</button>
-                        <button class="btn secondary sm" id="btnRatioLand" onclick="setRatio(1216/832, 1216, 832, this)">🖼️ Paysage 1216×832</button>
+                        <button class="btn secondary sm active-ratio" id="btnRatioSq" onclick="setRatio(1, 1024, 1024, this)">â¬› CarrÃ© 1024Ã—1024</button>
+                        <button class="btn secondary sm" id="btnRatioPort" onclick="setRatio(832/1216, 832, 1216, this)">ðŸ“± Portrait 832Ã—1216</button>
+                        <button class="btn secondary sm" id="btnRatioLand" onclick="setRatio(1216/832, 1216, 832, this)">ðŸ–¼ï¸ Paysage 1216Ã—832</button>
                     </div>
 
                     <div class="crop-canvas-wrapper">
@@ -122,37 +122,64 @@
                     </div>
 
                     <div class="crop-actions">
-                        <button class="btn primary" onclick="executeCrop('replace')">✂️ Recadrer et remplacer cette image</button>
-                        <button class="btn accent" onclick="executeCrop('extract')">➕ Extraire comme nouvelle image (Détail)</button>
-                        <button class="btn secondary" onclick="resetOriginal()">🔄 Réinitialiser l'original brut</button>
+                        <button class="btn primary" onclick="executeCrop('replace')">âœ‚ï¸ Recadrer et remplacer cette image</button>
+                        <button class="btn accent" onclick="executeCrop('extract')">âž• Extraire comme nouvelle image (DÃ©tail)</button>
+                        <button class="btn secondary" onclick="resetOriginal()">ðŸ”„ RÃ©initialiser l'original brut</button>
                     </div>
                 </div>
 
-                <!-- Panneau Droit : Tag Builder Bilingue -->
+                <!-- Panneau Droit : Tag Builder Bilingue + Copilote IA -->
                 <div class="tag-panel">
                     <div class="tag-header-row">
-                        <h3>Constructeur d'étiquettes (FR ➡️ EN)</h3>
-                        <button class="btn secondary sm" onclick="copyPrevCaption()">📋 Copier légende précédente</button>
+                        <h3>Constructeur d'Ã©tiquettes (FR âž¡ï¸ EN)</h3>
+                        <div style="display:flex; gap:6px;">
+                            <button class="btn secondary sm" onclick="copyPrevCaption()" title="Copier les tags de l'image prÃ©cÃ©dente">ðŸ“‹ Copier prÃ©c.</button>
+                            <button class="btn secondary sm" id="btnGeminiKey" onclick="promptGeminiKey()" title="Configurer la clÃ© API Gemini">ðŸ”‘ ClÃ© IA</button>
+                        </div>
                     </div>
-                    <p class="help-text">Cliquez sur les puces en français pour décrire le <strong>support matériel</strong> et le <strong>fond</strong> (afin que l'IA les dissocie du style culturel).</p>
 
+                    <!-- Barre Copilote IA & Traduction rapide -->
+                    <div class="copilot-bar">
+                        <div class="copilot-actions">
+                            <span class="copilot-title">âœ¨ Copilote IA :</span>
+                            <button class="btn accent sm" id="btnAiSuggest" onclick="runAiCopilot('suggest')" title="Analyse l'image et propose des puces pour le sujet figuratif, la posture et le support">ðŸ” SuggÃ©rer sujets (Vision)</button>
+                            <button class="btn primary sm" id="btnAiAudit" onclick="runAiCopilot('audit')" title="VÃ©rifie si des Ã©lÃ©ments non taguÃ©s risquent de polluer culturax_style">ðŸ›¡ï¸ Auditer le label</button>
+                        </div>
+                        <div class="quick-translate-row">
+                            <input type="text" id="quickFrInput" placeholder="Sujet spÃ©cifique en FR (ex: chat assis, guerrier avec lance...)" onkeydown="if(event.key==='Enter'){event.preventDefault(); runAiCopilot('translate');}">
+                            <button class="btn secondary sm" id="btnAiTranslate" onclick="runAiCopilot('translate')">ðŸŒ Traduire & Taguer</button>
+                        </div>
+                        <!-- Tiroir de rÃ©sultats du Copilote (masquÃ© par dÃ©faut) -->
+                        <div id="copilotDrawer" class="copilot-drawer hidden"></div>
+                    </div>
+
+                    <!-- Puces permanentes par catÃ©gories -->
                     <div id="pillsContainer" class="pills-container"></div>
 
+                    <!-- Ajout manuel d'une puce permanente dans tags_config.json -->
                     <div class="custom-tag-box">
-                        <input type="text" id="customFr" placeholder="Nom FR (ex: Ivoire)">
-                        <input type="text" id="customEn" placeholder="Tag EN (ex: carved ivory texture)">
-                        <button class="btn secondary sm" onclick="addCustomTag()">+ Créer puce</button>
+                        <select id="customCat" class="sm-select"></select>
+                        <input type="text" id="customFr" placeholder="Nom FR (ex: Tortue)">
+                        <input type="text" id="customEn" placeholder="Tag EN (ex: turtle figure)">
+                        <button class="btn secondary sm" onclick="addCustomTag()">+ Sauver puce</button>
                     </div>
 
-                    <label class="final-label">Fichier <code>.txt</code> final envoyé à Stable Diffusion XL (sauvegarde auto) :</label>
-                    <textarea id="modalCaption" rows="3" oninput="onModalCaptionInput()"></textarea>
-                    <div id="saveIndicator" class="save-indicator">✓ Sauvegardé</div>
+                    <!-- Zone d'Ã©dition finale + Jetons actifs cliquables -->
+                    <div class="final-caption-section">
+                        <div class="final-label-row">
+                            <label class="final-label">Jetons actifs dans le <code>.txt</code> (cliquez sur un jeton pour le retirer) :</label>
+                            <span id="saveIndicator" class="save-indicator">âœ“ SauvegardÃ©</span>
+                        </div>
+                        <div id="activeTokensBar" class="active-tokens-bar"></div>
+                        <textarea id="modalCaption" rows="2" oninput="onModalCaptionInput()" placeholder="culturax_style, ..."></textarea>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
-    <script src="/static/js/studio.js"></script>
+    <script src="static/js/studio.js"></script>
 </body>
 </html>
+
