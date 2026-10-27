@@ -476,3 +476,198 @@ input[type="text"], input[type="number"], select, textarea {
     background: #064e3b;
     border-color: #10b981;
 }
+
+
+/* === AJOUTS V3 : ATELIER D'ISOLATION VISUELLE (CADRAGE + DÉTOURAGE + EXTRACTION) === */
+.hidden { display: none !important; }
+
+.studio-mode-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.mode-tabs {
+    display: inline-flex;
+    background: #020617;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 3px;
+    gap: 4px;
+}
+
+.mode-tab {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.mode-tab:hover { color: #f1f5f9; }
+.mode-tab.active {
+    background: var(--primary);
+    color: white;
+    box-shadow: 0 1px 4px rgba(2, 132, 199, 0.4);
+}
+
+.ratio-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.toolbar-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-right: 2px;
+}
+
+.cutout-toolbar {
+    background: #162032;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.cutout-tools-row, .cutout-options-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.cutout-options-row {
+    padding-top: 6px;
+    border-top: 1px dashed #334155;
+    justify-content: space-between;
+}
+
+.tool-chip {
+    background: #0f172a;
+    border: 1px solid #475569;
+    color: #cbd5e1;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s;
+}
+.tool-chip:hover { border-color: #38bdf8; color: white; }
+.tool-chip.active {
+    background: #8b5cf6;
+    border-color: #a855f7;
+    color: white;
+}
+
+.cutout-slider-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    padding: 3px 8px;
+    border-radius: 6px;
+}
+.cutout-slider-group label {
+    margin: 0;
+    font-size: 0.74rem;
+    color: #cbd5e1;
+    white-space: nowrap;
+}
+.cutout-slider-group input[type="range"] {
+    width: 85px;
+    accent-color: #38bdf8;
+    cursor: pointer;
+}
+
+.cutout-quick-btns {
+    display: flex;
+    gap: 5px;
+    margin-left: auto;
+}
+
+.bg-swatch-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.bg-swatch {
+    background: #0f172a;
+    border: 1px solid #475569;
+    color: #cbd5e1;
+    padding: 3px 8px;
+    border-radius: 14px;
+    font-size: 0.74rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+.bg-swatch.active {
+    border-color: #38bdf8;
+    background: #0284c7;
+    color: white;
+    font-weight: 600;
+}
+.swatch-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.4);
+    display: inline-block;
+}
+
+.inline-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0;
+    font-size: 0.75rem;
+    color: #cbd5e1;
+    cursor: pointer;
+    user-select: none;
+}
+
+.cutout-canvas-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+
+#cutoutCanvas {
+    max-width: 100%;
+    max-height: calc(100% - 30px);
+    object-fit: contain;
+    cursor: crosshair;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    background: #090e1a;
+}
+
+.cutout-hint {
+    margin-top: 6px;
+    font-size: 0.74rem;
+    color: #94a3b8;
+    background: rgba(15, 23, 42, 0.9);
+    padding: 4px 10px;
+    border-radius: 12px;
+    border: 1px solid #334155;
+    text-align: center;
+}

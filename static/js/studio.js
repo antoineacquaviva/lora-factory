@@ -1,10 +1,37 @@
-let appState = { dataset: [], models: [], tags_config: {}, has_gemini_key: false };
+let appState = {
+    dataset: [],
+    models: [],
+    tags_config: {},
+    has_gemini_key: false,
+    gemini_model: "gemini-3.8-flash"
+};
 let currentModalIndex = -1;
 let cropper = null;
 let currentTargetW = 1024;
 let currentTargetH = 1024;
 let saveTimeout = null;
-let lastAiSuggestions = []; // Garde en mémoire les puces IA de l'image courante
+let lastAiSuggestions = [];
+
+/* === ÉTAT DE L'ATELIER D'ISOLATION VISUELLE (CADRAGE vs DÉTOURAGE) === */
+let studioToolMode = 'crop'; // 'crop' | 'cutout'
+let cutoutSubTool = 'lasso'; // 'lasso' | 'magic' | 'brush_keep' | 'brush_erase'
+let cutoutBgColor = 'white'; // 'white' | 'black' | 'grey'
+let cutoutTolerance = 28;    // Tolérance Baguette Magique (5 - 90)
+let cutoutBrushSize = 36;    // Taille du pinceau en pixels image (5 - 150)
+
+let cutoutImgObj = null;     // Image HTML chargée pour le détourage
+let cutoutImgData = null;    // ImageData original (RGBA) de l'image
+let cutoutMask = null;       // Uint8Array (w * h) : 255 = conservé, 0 = exclu
+let cutoutHistory = [];      // Pile d'historique Undo des masques (max 12)
+let lassoPoints = [];        // Points [{x, y}] en coordonnées image
+let isDrawingCutout = false; // Glisser en cours (pinceau ou lasso main levée)
+let hasExcludedAnything = false; // Indique si un premier détourage a déjà été appliqué
+
+const BG_HEX_MAP = {
+    white: [255, 255, 255],
+    black: [0, 0, 0],
+    grey:  [128, 128, 128]
+};
 
 async function fetchState() {
     const res = await fetch('api/state');
@@ -19,28 +46,41 @@ async function fetchState() {
 function updateGeminiKeyButton() {
     const btn = document.getElementById('btnGeminiKey');
     if (!btn) return;
+    const modelShort = (appState.gemini_model || 'gemini-3.8-flash').replace('models/', '');
     if (appState.has_gemini_key) {
-        btn.innerText = '🔑 Clé IA ✓';
+        btn.innerText = `🔑 IA (${modelShort}) ✓`;
         btn.style.borderColor = '#16a34a';
     } else {
-        btn.innerText = '🔑 Clé IA ?';
+        btn.innerText = `🔑 Clé IA ?`;
         btn.style.borderColor = '#ca8a04';
     }
 }
 
 async function promptGeminiKey() {
-    const msg = appState.has_gemini_key
-        ? "Une clé API Gemini est déjà configurée sur le serveur.\nEntrez une nouvelle clé pour la remplacer (ou laissez vide pour annuler) :"
-        : "Entrez votre clé API Google Gemini (AI Studio) :\nElle sera sauvegardée sur votre VM dans .gemini_key (ignoré par Git).";
-    const key = prompt(msg);
-    if (key === null || key.trim() === '') return;
+    const currentModel = appState.gemini_model || 'gemini-3.8-flash';
+    const keyMsg = appState.has_gemini_key
+        ? "Une clé API Gemini est déjà configurée sur le serveur.\nEntrez une nouvelle clé pour la remplacer, ou laissez VIDE pour conserver la clé actuelle :"
+        : "Entrez votre clé API Google Gemini (AI Studio) :";
+    const key = prompt(keyMsg);
+    if (key === null) return;
+
+    const model = prompt(
+        "Modèle Gemini à utiliser (ex: gemini-3.8-flash) :",
+        currentModel
+    );
+    if (model === null) return;
+
     const res = await fetch('api/gemini_key', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ api_key: key.trim() })
+        body: JSON.stringify({
+            api_key: key.trim(),
+            model: model.trim() || 'gemini-3.8-flash'
+        })
     });
     const data = await res.json();
     appState.has_gemini_key = data.has_gemini_key;
+    appState.gemini_model = data.gemini_model;
     updateGeminiKeyButton();
 }
 
@@ -107,7 +147,7 @@ function populateCustomCatSelect() {
     if (prev && cats.includes(prev)) {
         sel.value = prev;
     } else if (cats.length > 1) {
-        sel.value = cats[1]; // Sélectionne par défaut "2. Sujets & Motifs Figuratifs"
+        sel.value = cats[1];
     }
 }
 
@@ -147,7 +187,7 @@ async function deleteImage(imgName) {
     await fetchState();
 }
 
-/* === STUDIO MODAL (CROPPER + PILLS + COPILOTE) === */
+/* === STUDIO MODAL : OUVERTURE & BASCULE DES OUTILS === */
 function openStudio(idx) {
     if (idx < 0 || idx >= appState.dataset.length) return;
     currentModalIndex = idx;
@@ -158,7 +198,6 @@ function openStudio(idx) {
     document.getElementById('modalDims').innerText = `Actuel : ${item.width}×${item.height}`;
     document.getElementById('modalCaption').value = item.caption;
 
-    // Réinitialise le tiroir Copilote lors du changement d'image
     lastAiSuggestions = [];
     const drawer = document.getElementById('copilotDrawer');
     if (drawer) {
@@ -169,21 +208,85 @@ function openStudio(idx) {
     renderPills();
     syncPillsWithTextarea();
 
+    const imgUrl = `img/dataset/${encodeURIComponent(item.image)}?t=${Date.now()}`;
+    loadStudioImage(imgUrl);
+}
+
+function loadStudioImage(imgUrl) {
+    // 1. Charge pour Cropper.js
     const imgEl = document.getElementById('cropImage');
     if (cropper) {
         cropper.destroy();
         cropper = null;
     }
-    imgEl.src = `img/dataset/${encodeURIComponent(item.image)}?t=${Date.now()}`;
+    imgEl.src = imgUrl;
     imgEl.onload = () => {
-        cropper = new Cropper(imgEl, {
-            aspectRatio: currentTargetW / currentTargetH,
-            viewMode: 1,
-            autoCropArea: 0.95,
-            background: true,
-            responsive: true
-        });
+        if (studioToolMode === 'crop') {
+            initCropperInstance();
+        }
     };
+
+    // 2. Prépare en parallèle les données pixel pour l'atelier de Détourage
+    const rawImg = new Image();
+    rawImg.crossOrigin = "anonymous";
+    rawImg.onload = () => {
+        cutoutImgObj = rawImg;
+        const off = document.createElement('canvas');
+        off.width = rawImg.naturalWidth;
+        off.height = rawImg.naturalHeight;
+        const ctx = off.getContext('2d');
+        ctx.drawImage(rawImg, 0, 0);
+        cutoutImgData = ctx.getImageData(0, 0, off.width, off.height);
+        resetCutoutMask(false);
+        if (studioToolMode === 'cutout') {
+            renderCutoutCanvas();
+        }
+    };
+    rawImg.src = imgUrl;
+}
+
+function initCropperInstance() {
+    const imgEl = document.getElementById('cropImage');
+    if (cropper) cropper.destroy();
+    cropper = new Cropper(imgEl, {
+        aspectRatio: currentTargetW / currentTargetH,
+        viewMode: 1,
+        autoCropArea: 0.95,
+        background: true,
+        responsive: true
+    });
+}
+
+function switchStudioTool(mode) {
+    studioToolMode = mode;
+    document.getElementById('tabModeCrop').classList.toggle('active', mode === 'crop');
+    document.getElementById('tabModeCutout').classList.toggle('active', mode === 'cutout');
+
+    const cropperCont = document.getElementById('cropperContainer');
+    const cutoutCont = document.getElementById('cutoutContainer');
+    const cutoutToolbar = document.getElementById('cutoutToolbar');
+    const btnReplace = document.getElementById('btnActionReplace');
+    const btnExtract = document.getElementById('btnActionExtract');
+
+    if (mode === 'crop') {
+        cutoutToolbar.classList.add('hidden');
+        cutoutCont.classList.add('hidden');
+        cropperCont.classList.remove('hidden');
+        btnReplace.innerHTML = '✂️ Recadrer et remplacer cette image';
+        btnExtract.innerHTML = '➕ Extraire ce cadrage comme nouvelle image (Détail)';
+        initCropperInstance();
+    } else {
+        if (cropper) {
+            cropper.destroy();
+            cropper = null;
+        }
+        cropperCont.classList.add('hidden');
+        cutoutToolbar.classList.remove('hidden');
+        cutoutCont.classList.remove('hidden');
+        btnReplace.innerHTML = '🎭 Détourer et remplacer cette image';
+        btnExtract.innerHTML = '➕ Extraire ce sujet détouré comme nouvelle image';
+        renderCutoutCanvas();
+    }
 }
 
 function closeModal() {
@@ -205,38 +308,484 @@ function navigateModal(delta) {
 function setRatio(ratio, w, h, btnEl) {
     currentTargetW = w;
     currentTargetH = h;
-    document.querySelectorAll('.crop-toolbar .btn').forEach(b => b.classList.remove('active-ratio'));
+    document.querySelectorAll('.ratio-group .btn').forEach(b => b.classList.remove('active-ratio'));
     if (btnEl) btnEl.classList.add('active-ratio');
-    if (cropper) cropper.setAspectRatio(ratio);
+    if (studioToolMode === 'crop' && cropper) {
+        cropper.setAspectRatio(ratio);
+    } else if (studioToolMode === 'cutout') {
+        renderCutoutCanvas();
+    }
 }
 
-async function executeCrop(mode) {
-    if (!cropper) return;
-    const item = appState.dataset[currentModalIndex];
-    const data = cropper.getData(true);
+/* === MOTEUR DE DÉTOURAGE INTERACTIF (LASSO, BAGUETTE MAGIQUE, PINCEAUX) === */
+function setCutoutSubTool(subTool) {
+    cutoutSubTool = subTool;
+    lassoPoints = [];
+    document.getElementById('btnSubLasso').classList.toggle('active', subTool === 'lasso');
+    document.getElementById('btnSubMagic').classList.toggle('active', subTool === 'magic');
+    document.getElementById('btnSubKeep').classList.toggle('active', subTool === 'brush_keep');
+    document.getElementById('btnSubErase').classList.toggle('active', subTool === 'brush_erase');
 
-    const res = await fetch('api/crop', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            image: item.image,
-            mode: mode,
-            source: 'dataset',
-            x: data.x,
-            y: data.y,
-            w: data.width,
-            h: data.height,
-            target_w: currentTargetW,
-            target_h: currentTargetH
-        })
-    });
-    const ans = await res.json();
-    await fetchState();
-    if (mode === 'replace') {
-        openStudio(currentModalIndex);
+    const slider = document.getElementById('cutoutParamSlider');
+    const label = document.getElementById('sliderParamLabel');
+    const hint = document.getElementById('cutoutHintBar');
+
+    if (subTool === 'lasso') {
+        label.innerHTML = `Lissage : <span id="sliderParamVal">Polygone</span>`;
+        slider.style.display = 'none';
+        hint.innerHTML = `✒️ <strong>Lasso :</strong> Cliquez point par point (ou glissez à main levée) autour de la partie signifiante, puis <strong>double-cliquez</strong> (ou cliquez sur le 1er point) pour exclure le reste.`;
+    } else if (subTool === 'magic') {
+        slider.style.display = 'inline-block';
+        slider.min = 5;
+        slider.max = 90;
+        slider.value = cutoutTolerance;
+        label.innerHTML = `Tolérance couleur : <span id="sliderParamVal">${cutoutTolerance}</span>`;
+        hint.innerHTML = `🪄 <strong>Baguette Magique :</strong> Cliquez sur une zone de fond ou de bruit pour l'exclure d'un coup. (Astuce : <strong>Shift + Clic</strong> pour restaurer une zone).`;
     } else {
-        const newIdx = appState.dataset.findIndex(x => x.image === ans.image);
-        if (newIdx !== -1) openStudio(newIdx);
+        slider.style.display = 'inline-block';
+        slider.min = 5;
+        slider.max = 140;
+        slider.value = cutoutBrushSize;
+        const actionTxt = subTool === 'brush_keep' ? 'CONSERVER / RESTAURER' : 'EFFACER / EXCLURE';
+        label.innerHTML = `Taille pinceau : <span id="sliderParamVal">${cutoutBrushSize}px</span>`;
+        hint.innerHTML = `🖌️ <strong>Pinceau (${actionTxt}) :</strong> Peignez directement sur l'image pour affiner les contours du sujet.`;
+    }
+    renderCutoutCanvas();
+}
+
+function onCutoutSliderInput(val) {
+    const v = parseInt(val, 10);
+    const span = document.getElementById('sliderParamVal');
+    if (span) span.innerText = (cutoutSubTool === 'magic') ? v : `${v}px`;
+    if (cutoutSubTool === 'magic') {
+        cutoutTolerance = v;
+    } else {
+        cutoutBrushSize = v;
+    }
+}
+
+function setCutoutBg(bgKey, btnEl) {
+    cutoutBgColor = bgKey;
+    document.querySelectorAll('.bg-swatch').forEach(b => b.classList.remove('active'));
+    if (btnEl) btnEl.classList.add('active');
+    renderCutoutCanvas();
+}
+
+function saveMaskToHistory() {
+    if (!cutoutMask) return;
+    cutoutHistory.push(new Uint8Array(cutoutMask));
+    if (cutoutHistory.length > 12) cutoutHistory.shift();
+}
+
+function undoCutoutStep() {
+    if (lassoPoints.length > 0) {
+        lassoPoints.pop();
+        renderCutoutCanvas();
+        return;
+    }
+    if (cutoutHistory.length > 0) {
+        cutoutMask = cutoutHistory.pop();
+        renderCutoutCanvas();
+    }
+}
+
+function resetCutoutMask(recordHistory = true) {
+    if (!cutoutImgData) return;
+    if (recordHistory) saveMaskToHistory();
+    cutoutMask = new Uint8Array(cutoutImgData.width * cutoutImgData.height);
+    cutoutMask.fill(255);
+    lassoPoints = [];
+    hasExcludedAnything = false;
+    renderCutoutCanvas();
+}
+
+function invertCutoutMask() {
+    if (!cutoutMask) return;
+    saveMaskToHistory();
+    for (let i = 0; i < cutoutMask.length; i++) {
+        cutoutMask[i] = cutoutMask[i] > 127 ? 0 : 255;
+    }
+    hasExcludedAnything = true;
+    renderCutoutCanvas();
+}
+
+function getBoundingBoxOfKeptMask() {
+    if (!cutoutMask || !cutoutImgData) return null;
+    const w = cutoutImgData.width;
+    const h = cutoutImgData.height;
+    let minX = w, minY = h, maxX = -1, maxY = -1;
+    for (let y = 0; y < h; y++) {
+        const rowOffset = y * w;
+        for (let x = 0; x < w; x++) {
+            if (cutoutMask[rowOffset + x] > 127) {
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+    if (maxX < minX || maxY < minY) return null;
+    return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
+function renderCutoutCanvas() {
+    const canvas = document.getElementById('cutoutCanvas');
+    if (!canvas || !cutoutImgData || !cutoutMask) return;
+    const w = cutoutImgData.width;
+    const h = cutoutImgData.height;
+    if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+    }
+    const ctx = canvas.getContext('2d');
+    const outData = ctx.createImageData(w, h);
+    const src = cutoutImgData.data;
+    const dst = outData.data;
+
+    const previewSolid = document.getElementById('chkPreviewSolid')?.checked;
+    const bgRgb = BG_HEX_MAP[cutoutBgColor] || [255, 255, 255];
+
+    for (let i = 0; i < cutoutMask.length; i++) {
+        const p = i * 4;
+        if (cutoutMask[i] > 127) {
+            dst[p] = src[p];
+            dst[p + 1] = src[p + 1];
+            dst[p + 2] = src[p + 2];
+            dst[p + 3] = 255;
+        } else {
+            if (previewSolid) {
+                dst[p] = bgRgb[0];
+                dst[p + 1] = bgRgb[1];
+                dst[p + 2] = bgRgb[2];
+                dst[p + 3] = 255;
+            } else {
+                // Voile rouge/sombre semi-transparent permettant de voir ce qu'on a exclu pour pouvoir le corriger au pinceau
+                dst[p] = Math.round(src[p] * 0.22 + 50);
+                dst[p + 1] = Math.round(src[p + 1] * 0.15 + 10);
+                dst[p + 2] = Math.round(src[p + 2] * 0.18 + 18);
+                dst[p + 3] = 255;
+            }
+        }
+    }
+    ctx.putImageData(outData, 0, 0);
+
+    // Si "Recadrer & centrer auto" est activé et qu'une zone est détourée, afficher en pointillés verts la boîte englobante détectée
+    const autoFit = document.getElementById('chkAutoFit')?.checked;
+    if (autoFit && hasExcludedAnything && !previewSolid) {
+        const bbox = getBoundingBoxOfKeptMask();
+        if (bbox) {
+            ctx.save();
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = Math.max(2, Math.round(w / 350));
+            ctx.setLineDash([8, 6]);
+            ctx.strokeRect(bbox.x, bbox.y, bbox.w, bbox.h);
+            ctx.restore();
+        }
+    }
+
+    // Dessiner le polygone du Lasso en cours de tracé
+    if (cutoutSubTool === 'lasso' && lassoPoints.length > 0) {
+        ctx.save();
+        ctx.lineWidth = Math.max(2.5, Math.round(w / 300));
+        ctx.strokeStyle = '#fde047';
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.20)';
+        ctx.beginPath();
+        ctx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
+        for (let i = 1; i < lassoPoints.length; i++) {
+            ctx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
+        }
+        ctx.stroke();
+
+        // Points d'ancrage
+        const r = Math.max(4, Math.round(w / 160));
+        for (let i = 0; i < lassoPoints.length; i++) {
+            ctx.beginPath();
+            ctx.arc(lassoPoints[i].x, lassoPoints[i].y, i === 0 ? r * 1.35 : r, 0, Math.PI * 2);
+            ctx.fillStyle = i === 0 ? '#22c55e' : '#fde047';
+            ctx.fill();
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+}
+
+function getCanvasImageCoords(evt) {
+    const canvas = document.getElementById('cutoutCanvas');
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+        x: Math.max(0, Math.min(canvas.width - 1, Math.round((evt.clientX - rect.left) * scaleX))),
+        y: Math.max(0, Math.min(canvas.height - 1, Math.round((evt.clientY - rect.top) * scaleY)))
+    };
+}
+
+function applyPolygonLasso() {
+    if (lassoPoints.length < 3 || !cutoutImgData) return;
+    saveMaskToHistory();
+    const w = cutoutImgData.width;
+    const h = cutoutImgData.height;
+
+    const polyCanvas = document.createElement('canvas');
+    polyCanvas.width = w;
+    polyCanvas.height = h;
+    const pCtx = polyCanvas.getContext('2d');
+    pCtx.fillStyle = '#ffffff';
+    pCtx.beginPath();
+    pCtx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
+    for (let i = 1; i < lassoPoints.length; i++) {
+        pCtx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
+    }
+    pCtx.closePath();
+    pCtx.fill();
+
+    const pData = pCtx.getImageData(0, 0, w, h).data;
+    // Si aucune exclusion n'avait encore été faite, le lasso définit la zone à GARDER et exclut tout l'extérieur.
+    // Si un détourage existait déjà, le lasso ajoute/garde la zone entourée.
+    const firstCut = !hasExcludedAnything;
+    for (let i = 0; i < cutoutMask.length; i++) {
+        const inside = pData[i * 4 + 3] > 127;
+        if (firstCut) {
+            cutoutMask[i] = inside ? 255 : 0;
+        } else if (inside) {
+            cutoutMask[i] = 255;
+        }
+    }
+    hasExcludedAnything = true;
+    lassoPoints = [];
+    renderCutoutCanvas();
+}
+
+function applyMagicWandFloodFill(startX, startY, targetKeepVal) {
+    if (!cutoutImgData || !cutoutMask) return;
+    saveMaskToHistory();
+    const w = cutoutImgData.width;
+    const h = cutoutImgData.height;
+    const src = cutoutImgData.data;
+
+    const startIdx = (startY * w + startX) * 4;
+    const r0 = src[startIdx];
+    const g0 = src[startIdx + 1];
+    const b0 = src[startIdx + 2];
+
+    // Seuil de distance couleur quadratique
+    const maxDistSq = (cutoutTolerance * 1.85) * (cutoutTolerance * 1.85) * 3;
+    const visited = new Uint8Array(w * h);
+    const stack = [startY * w + startX];
+    visited[startY * w + startX] = 1;
+
+    while (stack.length > 0) {
+        const idx = stack.pop();
+        cutoutMask[idx] = targetKeepVal;
+
+        const x = idx % w;
+        const y = (idx - x) / w;
+
+        const neighbors = [];
+        if (x > 0) neighbors.push(idx - 1);
+        if (x < w - 1) neighbors.push(idx + 1);
+        if (y > 0) neighbors.push(idx - w);
+        if (y < h - 1) neighbors.push(idx + w);
+
+        for (let n = 0; n < neighbors.length; n++) {
+            const nIdx = neighbors[n];
+            if (visited[nIdx]) continue;
+            visited[nIdx] = 1;
+            const p = nIdx * 4;
+            const dr = src[p] - r0;
+            const dg = src[p + 1] - g0;
+            const db = src[p + 2] - b0;
+            if (dr * dr + dg * dg + db * db <= maxDistSq) {
+                stack.push(nIdx);
+            }
+        }
+    }
+    hasExcludedAnything = true;
+    renderCutoutCanvas();
+}
+
+function paintMaskCircle(cx, cy, radius, val) {
+    if (!cutoutMask || !cutoutImgData) return;
+    const w = cutoutImgData.width;
+    const h = cutoutImgData.height;
+    const rSq = radius * radius;
+    const minX = Math.max(0, Math.floor(cx - radius));
+    const maxX = Math.min(w - 1, Math.ceil(cx + radius));
+    const minY = Math.max(0, Math.floor(cy - radius));
+    const maxY = Math.min(h - 1, Math.ceil(cy + radius));
+
+    for (let y = minY; y <= maxY; y++) {
+        const dy = y - cy;
+        const rowOffset = y * w;
+        for (let x = minX; x <= maxX; x++) {
+            const dx = x - cx;
+            if (dx * dx + dy * dy <= rSq) {
+                cutoutMask[rowOffset + x] = val;
+            }
+        }
+    }
+    hasExcludedAnything = true;
+}
+
+function initCutoutCanvasEvents() {
+    const canvas = document.getElementById('cutoutCanvas');
+    if (!canvas) return;
+
+    canvas.addEventListener('mousedown', (e) => {
+        if (e.button !== 0 || !cutoutImgData) return;
+        const pt = getCanvasImageCoords(e);
+
+        if (cutoutSubTool === 'lasso') {
+            // Si on clique tout près du 1er point avec au moins 3 points, on ferme le polygone
+            if (lassoPoints.length >= 3) {
+                const dx = pt.x - lassoPoints[0].x;
+                const dy = pt.y - lassoPoints[0].y;
+                const closeRadius = Math.max(12, cutoutImgData.width / 60);
+                if (Math.hypot(dx, dy) <= closeRadius) {
+                    applyPolygonLasso();
+                    return;
+                }
+            }
+            lassoPoints.push(pt);
+            isDrawingCutout = true;
+            renderCutoutCanvas();
+        } else if (cutoutSubTool === 'magic') {
+            // Clic normal = exclure le fond (0) ; Shift+Clic = restaurer (255)
+            const targetVal = e.shiftKey ? 255 : 0;
+            applyMagicWandFloodFill(pt.x, pt.y, targetVal);
+        } else if (cutoutSubTool === 'brush_keep' || cutoutSubTool === 'brush_erase') {
+            saveMaskToHistory();
+            isDrawingCutout = true;
+            const val = (cutoutSubTool === 'brush_keep') ? 255 : 0;
+            paintMaskCircle(pt.x, pt.y, cutoutBrushSize, val);
+            renderCutoutCanvas();
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+        if (!isDrawingCutout || !cutoutImgData) return;
+        const pt = getCanvasImageCoords(e);
+        if (cutoutSubTool === 'lasso') {
+            const last = lassoPoints[lassoPoints.length - 1];
+            if (!last || Math.hypot(pt.x - last.x, pt.y - last.y) > Math.max(6, cutoutImgData.width / 150)) {
+                lassoPoints.push(pt);
+                renderCutoutCanvas();
+            }
+        } else if (cutoutSubTool === 'brush_keep' || cutoutSubTool === 'brush_erase') {
+            const val = (cutoutSubTool === 'brush_keep') ? 255 : 0;
+            paintMaskCircle(pt.x, pt.y, cutoutBrushSize, val);
+            renderCutoutCanvas();
+        }
+    });
+
+    window.addEventListener('mouseup', () => {
+        if (isDrawingCutout) {
+            isDrawingCutout = false;
+        }
+    });
+
+    canvas.addEventListener('dblclick', (e) => {
+        if (cutoutSubTool === 'lasso' && lassoPoints.length >= 3) {
+            e.preventDefault();
+            applyPolygonLasso();
+        }
+    });
+}
+
+/* === EXÉCUTION UNIFIÉE : REMPLACER OU EXTRAIRE COMME NOUVELLE IMAGE === */
+async function executeVisualIsolation(actionMode) {
+    if (currentModalIndex < 0) return;
+    const item = appState.dataset[currentModalIndex];
+
+    if (studioToolMode === 'crop') {
+        if (!cropper) return;
+        const data = cropper.getData(true);
+        const res = await fetch('api/crop', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                image: item.image,
+                mode: actionMode,
+                source: 'dataset',
+                x: data.x,
+                y: data.y,
+                w: data.width,
+                h: data.height,
+                target_w: currentTargetW,
+                target_h: currentTargetH
+            })
+        });
+        const ans = await res.json();
+        await fetchState();
+        if (actionMode === 'replace') {
+            openStudio(currentModalIndex);
+        } else {
+            const newIdx = appState.dataset.findIndex(x => x.image === ans.image);
+            if (newIdx !== -1) openStudio(newIdx);
+        }
+    } else {
+        // Mode Détourage : si un polygone lasso est ouvert et non validé, on l'applique d'abord
+        if (lassoPoints.length >= 3) {
+            applyPolygonLasso();
+        }
+        const bbox = getBoundingBoxOfKeptMask();
+        if (!bbox) {
+            return alert("Attention : toute l'image est actuellement exclue ! Gardez au moins une partie signifiante avant de valider.");
+        }
+
+        // Génère un PNG RGBA transparent côté client avec uniquement la zone conservée
+        const w = cutoutImgData.width;
+        const h = cutoutImgData.height;
+        const off = document.createElement('canvas');
+        off.width = w;
+        off.height = h;
+        const ctx = off.getContext('2d');
+        const rgbaOut = ctx.createImageData(w, h);
+        const src = cutoutImgData.data;
+        const dst = rgbaOut.data;
+        for (let i = 0; i < cutoutMask.length; i++) {
+            const p = i * 4;
+            dst[p] = src[p];
+            dst[p + 1] = src[p + 1];
+            dst[p + 2] = src[p + 2];
+            dst[p + 3] = cutoutMask[i] > 127 ? 255 : 0;
+        }
+        ctx.putImageData(rgbaOut, 0, 0);
+        const b64Png = off.toDataURL('image/png');
+
+        const autoFit = document.getElementById('chkAutoFit')?.checked ?? true;
+        const autoTagBg = document.getElementById('chkAutoTagBg')?.checked ?? true;
+        const trigger = document.getElementById('triggerWord').value.trim();
+
+        const res = await fetch('api/cutout', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                image: item.image,
+                mode: actionMode,
+                bg_color: cutoutBgColor,
+                auto_fit: autoFit,
+                auto_tag_bg: autoTagBg,
+                target_w: currentTargetW,
+                target_h: currentTargetH,
+                trigger: trigger,
+                image_b64: b64Png,
+                bbox: bbox
+            })
+        });
+        const ans = await res.json();
+        if (ans.error) return alert(ans.error);
+
+        await fetchState();
+        if (actionMode === 'replace') {
+            openStudio(currentModalIndex);
+        } else {
+            const newIdx = appState.dataset.findIndex(x => x.image === ans.image);
+            if (newIdx !== -1) openStudio(newIdx);
+        }
     }
 }
 
@@ -255,7 +804,7 @@ async function resetOriginal() {
     }
 }
 
-/* === LOGIQUE MULTI-TAGS SANS DOUBLONS (AXE 1 & AXE 2) === */
+/* === LOGIQUE MULTI-TAGS SANS DOUBLONS === */
 function parseTagList(str) {
     return (str || '').split(',').map(s => s.trim()).filter(Boolean);
 }
@@ -282,7 +831,6 @@ function syncPillsWithTextarea() {
     const parts = getCaptionParts();
     const partsLowerSet = new Set(parts.map(p => p.toLowerCase()));
 
-    // 1. Synchronise les puces permanentes ET les puces IA du tiroir (supporte les tags contenant des virgules)
     document.querySelectorAll('.tag-pill, .ai-pill[data-en]').forEach(pill => {
         const subTags = parseTagList(pill.getAttribute('data-en')).map(s => s.toLowerCase());
         if (!subTags.length) return;
@@ -296,7 +844,6 @@ function syncPillsWithTextarea() {
         }
     });
 
-    // 2. Affiche les jetons actifs sous forme de badges cliquables
     renderActiveTokensBar(parts);
 }
 
@@ -333,14 +880,12 @@ function toggleTagString(enTagString) {
     const partsLowerSet = new Set(parts.map(p => p.toLowerCase()));
     const subTagsLower = subTags.map(s => s.toLowerCase());
 
-    // Si TOUS les sous-tags de la puce sont présents -> on les retire tous
     const allPresent = subTagsLower.every(st => partsLowerSet.has(st));
 
     if (allPresent) {
         const toRemove = new Set(subTagsLower);
         parts = parts.filter(p => !toRemove.has(p.toLowerCase()));
     } else {
-        // Sinon -> on ajoute uniquement les sous-tags manquants (zéro doublon)
         for (const st of subTags) {
             if (!partsLowerSet.has(st.toLowerCase())) {
                 parts.push(st);
@@ -420,7 +965,7 @@ async function addCustomTag(customCategory = null, frVal = null, enVal = null) {
     populateBatchSelect();
 }
 
-/* === AXE 3 : COPILOTE IA GEMINI VISION (SUGGESTIONS, AUDIT, TRADUCTION) === */
+/* === COPILOTE IA GEMINI VISION (SUGGESTIONS, AUDIT, TRADUCTION) === */
 async function runAiCopilot(mode) {
     if (currentModalIndex < 0) return;
     const item = appState.dataset[currentModalIndex];
@@ -443,7 +988,7 @@ async function runAiCopilot(mode) {
     }
 
     drawer.classList.remove('hidden');
-    drawer.innerHTML = `<div style="color:#38bdf8;">⏳ Analyse Gemini en cours (${mode})...</div>`;
+    drawer.innerHTML = `<div style="color:#38bdf8;">⏳ Analyse Gemini (${appState.gemini_model || 'gemini-3.8-flash'}) en cours...</div>`;
 
     try {
         const res = await fetch('api/ai_copilot', {
@@ -467,7 +1012,6 @@ async function runAiCopilot(mode) {
             renderAuditDrawer(data);
         } else if (mode === 'translate') {
             document.getElementById('quickFrInput').value = '';
-            // Ajoute directement les tags traduits au .txt et affiche aussi les puces pour pouvoir les épingler
             if (data.combined_en) {
                 toggleTagString(data.combined_en);
             }
@@ -580,6 +1124,16 @@ document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') closeModal();
         return;
     }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && studioToolMode === 'cutout') {
+        e.preventDefault();
+        undoCutoutStep();
+        return;
+    }
+    if (e.key === 'Enter' && studioToolMode === 'cutout' && cutoutSubTool === 'lasso' && lassoPoints.length >= 3) {
+        e.preventDefault();
+        applyPolygonLasso();
+        return;
+    }
     if (e.key === 'ArrowRight') navigateModal(1);
     if (e.key === 'ArrowLeft') navigateModal(-1);
     if (e.key === 'Escape') closeModal();
@@ -630,6 +1184,7 @@ async function pollLogs() {
     }
 }
 
+initCutoutCanvasEvents();
 fetchState();
 pollLogs();
 setInterval(pollLogs, 3500);

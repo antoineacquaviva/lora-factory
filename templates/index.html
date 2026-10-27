@@ -71,7 +71,7 @@
                 <div class="toolbar">
                     <div>
                         <h2>Lot d'entraînement (<span id="imgCount">0</span> images)</h2>
-                        <p class="subtitle">Cliquez sur une vignette pour ouvrir la <strong>Table Lumineuse (Recadrage SDXL + Puces + Copilote IA)</strong>.</p>
+                        <p class="subtitle">Cliquez sur une vignette pour ouvrir la <strong>Table Lumineuse (Recadrage, Détourage, Extraction de détail & Copilote IA)</strong>.</p>
                     </div>
                     <div class="batch-actions">
                         <button class="btn secondary sm" onclick="selectAll(true)">Tout cocher</button>
@@ -95,7 +95,7 @@
         </section>
     </main>
 
-    <!-- MODALE STUDIO PLEIN ÉCRAN (Recadrage + Constructeur de Tags + Copilote IA) -->
+    <!-- MODALE STUDIO PLEIN ÉCRAN (Table Lumineuse : Cadrage / Détourage + Constructeur de Tags + Copilote IA) -->
     <div id="studioModal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -109,23 +109,95 @@
             </div>
 
             <div class="modal-body">
-                <!-- Panneau Gauche : Cropper -->
+                <!-- Panneau Gauche : Table d'Isolation Visuelle (Cadrage & Détourage) -->
                 <div class="crop-panel">
-                    <div class="crop-toolbar">
-                        <span class="toolbar-label">Ratios SDXL :</span>
-                        <button class="btn secondary sm active-ratio" id="btnRatioSq" onclick="setRatio(1, 1024, 1024, this)">⬛ Carré 1024×1024</button>
-                        <button class="btn secondary sm" id="btnRatioPort" onclick="setRatio(832/1216, 832, 1216, this)">📱 Portrait 832×1216</button>
-                        <button class="btn secondary sm" id="btnRatioLand" onclick="setRatio(1216/832, 1216, 832, this)">🖼️ Paysage 1216×832</button>
+                    <!-- Sélecteur d'atelier principal + Formats cibles SDXL -->
+                    <div class="studio-mode-bar">
+                        <div class="mode-tabs">
+                            <button class="mode-tab active" id="tabModeCrop" onclick="switchStudioTool('crop')">📐 1. Cadrage rectangulaire</button>
+                            <button class="mode-tab" id="tabModeCutout" onclick="switchStudioTool('cutout')">🎭 2. Détourage & Isolation</button>
+                        </div>
+                        <div class="ratio-group">
+                            <span class="toolbar-label">Cible SDXL :</span>
+                            <button class="btn secondary sm active-ratio" id="btnRatioSq" onclick="setRatio(1, 1024, 1024, this)" title="Carré 1024×1024">⬛ 1:1</button>
+                            <button class="btn secondary sm" id="btnRatioPort" onclick="setRatio(832/1216, 832, 1216, this)" title="Portrait 832×1216">📱 2:3</button>
+                            <button class="btn secondary sm" id="btnRatioLand" onclick="setRatio(1216/832, 1216, 832, this)" title="Paysage 1216×832">🖼️ 3:2</button>
+                        </div>
                     </div>
 
-                    <div class="crop-canvas-wrapper">
-                        <img id="cropImage" src="" alt="Crop target">
+                    <!-- Barre d'outils spécifique au mode Détourage (masquée en mode Cadrage) -->
+                    <div id="cutoutToolbar" class="cutout-toolbar hidden">
+                        <div class="cutout-tools-row">
+                            <button class="tool-chip active" id="btnSubLasso" onclick="setCutoutSubTool('lasso')" title="Cliquez point par point ou tracez à main levée autour du sujet à garder">✒️ Lasso Polygonal</button>
+                            <button class="tool-chip" id="btnSubMagic" onclick="setCutoutSubTool('magic')" title="Cliquez sur une couleur de fond pour l'exclure automatiquement (Shift+Clic pour conserver)">🪄 Baguette (Fond)</button>
+                            <button class="tool-chip" id="btnSubKeep" onclick="setCutoutSubTool('brush_keep')" title="Peindre pour restaurer / conserver une zone">🖌️ Garder (+)</button>
+                            <button class="tool-chip" id="btnSubErase" onclick="setCutoutSubTool('brush_erase')" title="Peindre pour effacer du bruit ou un élément non signifiant">🧽 Gommer (-)</button>
+
+                            <div class="cutout-slider-group" id="sliderGroupParam">
+                                <label id="sliderParamLabel">Tolérance : <span id="sliderParamVal">28</span></label>
+                                <input type="range" id="cutoutParamSlider" min="5" max="90" value="28" oninput="onCutoutSliderInput(this.value)">
+                            </div>
+
+                            <div class="cutout-quick-btns">
+                                <button class="btn secondary sm" onclick="undoCutoutStep()" title="Annuler la dernière opération de détourage (Ctrl+Z)">↩️ Annuler</button>
+                                <button class="btn secondary sm" onclick="invertCutoutMask()" title="Inverser la zone conservée et la zone exclue">🔄 Inverser</button>
+                                <button class="btn secondary sm" onclick="resetCutoutMask(true)" title="Tout conserver (réinitialiser le masque)">Tout garder</button>
+                            </div>
+                        </div>
+
+                        <div class="cutout-options-row">
+                            <div class="bg-swatch-group">
+                                <span class="toolbar-label">Fond neutre :</span>
+                                <button class="bg-swatch active" data-bg="white" onclick="setCutoutBg('white', this)" title="Fond blanc pur (isolated on pure white background)">
+                                    <span class="swatch-dot" style="background:#ffffff;"></span> Blanc
+                                </button>
+                                <button class="bg-swatch" data-bg="black" onclick="setCutoutBg('black', this)" title="Fond noir studio (solid black background, studio lighting)">
+                                    <span class="swatch-dot" style="background:#000000;"></span> Noir
+                                </button>
+                                <button class="bg-swatch" data-bg="grey" onclick="setCutoutBg('grey', this)" title="Fond gris neutre (neutral grey background)">
+                                    <span class="swatch-dot" style="background:#808080;"></span> Gris
+                                </button>
+                            </div>
+
+                            <label class="inline-check" title="Centre et agrandit automatiquement la partie détourée dans le format SDXL choisi (1024×1024, etc.)">
+                                <input type="checkbox" id="chkAutoFit" checked onchange="renderCutoutCanvas()">
+                                <span>Recadrer & centrer auto (SDXL)</span>
+                            </label>
+
+                            <label class="inline-check" title="Ajoute automatiquement le tag du fond neutre (ex: isolated on pure white background) dans le .txt pour protéger le style">
+                                <input type="checkbox" id="chkAutoTagBg" checked>
+                                <span>Auto-taguer le fond (.txt)</span>
+                            </label>
+
+                            <label class="inline-check" title="Prévisualiser le rendu final sur fond uni au lieu du voile rouge d'édition">
+                                <input type="checkbox" id="chkPreviewSolid" onchange="renderCutoutCanvas()">
+                                <span>👁️ Aperçu final</span>
+                            </label>
+                        </div>
                     </div>
 
+                    <!-- Zone Canevas Unifiée -->
+                    <div class="crop-canvas-wrapper" id="canvasWrapper">
+                        <div id="cropperContainer" style="width:100%; height:100%; display:flex; align-items:center; justify-content:center;">
+                            <img id="cropImage" src="" alt="Crop target">
+                        </div>
+                        <div id="cutoutContainer" class="cutout-canvas-container hidden">
+                            <canvas id="cutoutCanvas"></canvas>
+                            <div id="cutoutHintBar" class="cutout-hint">✒️ <strong>Lasso :</strong> Cliquez autour du sujet (ou glissez) puis double-cliquez pour isoler le sujet et exclure le reste.</div>
+                        </div>
+                    </div>
+
+                    <!-- Actions de sortie unifiées (Remplacer vs Extraire comme nouvelle image + Reset) -->
                     <div class="crop-actions">
-                        <button class="btn primary" onclick="executeCrop('replace')">✂️ Recadrer et remplacer cette image</button>
-                        <button class="btn accent" onclick="executeCrop('extract')">➕ Extraire comme nouvelle image (Détail)</button>
-                        <button class="btn secondary" onclick="resetOriginal()">🔄 Réinitialiser l'original brut</button>
+                        <button class="btn primary" id="btnActionReplace" onclick="executeVisualIsolation('replace')" title="Applique l'isolation (cadrage ou détourage) directement sur l'image courante">
+                            ✂️ Remplacer cette image
+                        </button>
+                        <button class="btn accent" id="btnActionExtract" onclick="executeVisualIsolation('extract')" title="Crée une nouvelle image distincte dans le lot à partir de cette sélection (idéal pour isoler un 2e sujet ou un détail et lui apposer son propre label)">
+                            ➕ Extraire comme nouvelle image (Détail / Sujet isolé)
+                        </button>
+                        <button class="btn secondary" onclick="resetOriginal()" title="Restaurer la photo originale brute d'origine">
+                            🔄 Réinitialiser l'original
+                        </button>
                     </div>
                 </div>
 
@@ -135,7 +207,7 @@
                         <h3>Constructeur d'étiquettes (FR ➡️ EN)</h3>
                         <div style="display:flex; gap:6px;">
                             <button class="btn secondary sm" onclick="copyPrevCaption()" title="Copier les tags de l'image précédente">📋 Copier préc.</button>
-                            <button class="btn secondary sm" id="btnGeminiKey" onclick="promptGeminiKey()" title="Configurer la clé API Gemini">🔑 Clé IA</button>
+                            <button class="btn secondary sm" id="btnGeminiKey" onclick="promptGeminiKey()" title="Configurer la clé API et le modèle Gemini">🔑 Clé IA</button>
                         </div>
                     </div>
 

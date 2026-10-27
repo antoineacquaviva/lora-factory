@@ -8,7 +8,7 @@ import urllib.request
 import urllib.error
 from io import BytesIO
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageDraw
 from flask import Flask, request, jsonify, send_from_directory, render_template
 from werkzeug.utils import secure_filename
 
@@ -23,11 +23,19 @@ TAGS_FILE = BASE_DIR / "tags_config.json"
 LOG_FILE = BASE_DIR / "training.log"
 PID_FILE = BASE_DIR / "training.pid"
 GEMINI_KEY_FILE = BASE_DIR / ".gemini_key"
+GEMINI_MODEL_FILE = BASE_DIR / ".gemini_model"
 
 for d in [ORIGINALS_DIR, DATASET_DIR, MODELS_DIR, SCRIPTS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTS = {'.jpg', '.jpeg', '.png', '.webp'}
+
+BG_PRESETS = {
+    "white":  {"rgb": (255, 255, 255), "tag": "isolated on pure white background"},
+    "black":  {"rgb": (0, 0, 0),       "tag": "solid black background, studio lighting"},
+    "grey":   {"rgb": (128, 128, 128), "tag": "neutral grey background"},
+    "green":  {"rgb": (0, 255, 0),     "tag": "solid green screen background"}
+}
 
 def is_running():
     if not PID_FILE.exists():
@@ -52,16 +60,48 @@ def get_gemini_api_key():
         return GEMINI_KEY_FILE.read_text(encoding='utf-8').strip()
     return ""
 
+def get_gemini_model():
+    if GEMINI_MODEL_FILE.exists():
+        m = GEMINI_MODEL_FILE.read_text(encoding='utf-8').strip()
+        if m:
+            return m
+    return os.environ.get("GEMINI_MODEL", "gemini-3.8-flash").strip()
+
 def split_subtags(tag_str):
     return [p.strip() for p in tag_str.split(',') if p.strip()]
+
+def update_caption_bg_tag(txt_path, new_bg_tag, trigger="culturax_style"):
+    """Met à jour automatiquement le tag de fond dans le fichier .txt pour protéger le mot-clé de style."""
+    all_bg_subtags = set()
+    for preset in BG_PRESETS.values():
+        for st in split_subtags(preset["tag"]):
+            all_bg_subtags.add(st.lower())
+
+    current = txt_path.read_text(encoding='utf-8').strip() if txt_path.exists() else trigger
+    parts = split_subtags(current)
+    if not parts and trigger:
+        parts = [trigger]
+
+    # Retirer les anciens tags de fond unis contradictoires
+    parts = [p for p in parts if p.lower() not in all_bg_subtags]
+    parts_lower = [p.lower() for p in parts]
+
+    for st in split_subtags(new_bg_tag):
+        if st.lower() not in parts_lower:
+            parts.append(st)
+            parts_lower.append(st.lower())
+
+    txt_path.write_text(", ".join(parts), encoding='utf-8')
 
 def call_gemini_api(parts, response_schema=None, temperature=0.2):
     api_key = get_gemini_api_key()
     if not api_key:
-        raise ValueError("Clé API Gemini manquante. Configurez-la via le bouton ⚙️ Clé API dans le Studio ou via la variable d'environnement GEMINI_API_KEY.")
+        raise ValueError("Clé API Gemini manquante. Configurez-la via le bouton 🔑 Clé IA dans le Studio ou via la variable d'environnement GEMINI_API_KEY.")
 
-    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    primary_model = get_gemini_model()
+    fallback_models = [primary_model, "gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
+    # Déduplication en préservant l'ordre
+    models_to_try = list(dict.fromkeys(m for m in fallback_models if m))
 
     payload = {
         "contents": [{"parts": parts}],
@@ -73,20 +113,31 @@ def call_gemini_api(parts, response_schema=None, temperature=0.2):
     if response_schema:
         payload["generationConfig"]["responseSchema"] = response_schema
 
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode('utf-8'),
-        headers={'Content-Type': 'application/json'},
-        method='POST'
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            res_data = json.loads(resp.read().decode('utf-8'))
-            text_out = res_data["candidates"][0]["content"]["parts"][0]["text"]
-            return json.loads(text_out)
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode('utf-8', errors='replace')
-        raise RuntimeError(f"Erreur API Gemini ({e.code}) : {err_body}")
+    last_err = None
+    for model in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=35) as resp:
+                res_data = json.loads(resp.read().decode('utf-8'))
+                text_out = res_data["candidates"][0]["content"]["parts"][0]["text"]
+                # Si un modèle de secours a fonctionné suite à un 404, on le mémorise
+                if model != primary_model:
+                    GEMINI_MODEL_FILE.write_text(model, encoding='utf-8')
+                return json.loads(text_out)
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode('utf-8', errors='replace')
+            last_err = f"Erreur API Gemini ({e.code} sur {model}) : {err_body}"
+            if e.code == 404:
+                continue
+            raise RuntimeError(last_err)
+
+    raise RuntimeError(last_err or "Impossible de joindre un modèle Gemini valide.")
 
 @app.route('/')
 def index():
@@ -124,19 +175,27 @@ def api_state():
         "dataset": items,
         "models": models,
         "tags_config": load_tags_config(),
-        "has_gemini_key": bool(get_gemini_api_key())
+        "has_gemini_key": bool(get_gemini_api_key()),
+        "gemini_model": get_gemini_model()
     })
 
 @app.route('/api/gemini_key', methods=['POST'])
 def api_save_gemini_key():
     data = request.json or {}
     key = data.get('api_key', '').strip()
+    model = data.get('model', '').strip()
     if key:
         GEMINI_KEY_FILE.write_text(key, encoding='utf-8')
         os.chmod(GEMINI_KEY_FILE, 0o600)
-    elif GEMINI_KEY_FILE.exists():
+    elif data.get('clear_key') and GEMINI_KEY_FILE.exists():
         GEMINI_KEY_FILE.unlink()
-    return jsonify({"status": "ok", "has_gemini_key": bool(get_gemini_api_key())})
+    if model:
+        GEMINI_MODEL_FILE.write_text(model, encoding='utf-8')
+    return jsonify({
+        "status": "ok",
+        "has_gemini_key": bool(get_gemini_api_key()),
+        "gemini_model": get_gemini_model()
+    })
 
 @app.route('/api/ai_copilot', methods=['POST'])
 def api_ai_copilot():
@@ -185,7 +244,6 @@ Return a JSON object with:
 
         current_caption = data.get('caption', '').strip()
 
-        # Resize image in memory to max 768px to keep latency & token usage tiny
         with Image.open(img_path) as im:
             im = im.convert("RGB")
             im.thumbnail((768, 768), Image.Resampling.LANCZOS)
@@ -371,11 +429,40 @@ def api_custom_tag():
     cfg = load_tags_config()
     if category not in cfg:
         cfg[category] = []
-    # Avoid duplicate in same category
     if not any(t['en'].lower() == en_tag.lower() for t in cfg[category]):
         cfg[category].append({"fr": fr_label, "en": en_tag})
         TAGS_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
     return jsonify({"status": "ok", "tags_config": cfg})
+
+def save_processed_image(pil_img, img_name, mode, suffix_tag="crop", bg_preset_key=None, auto_tag_bg=False, trigger="culturax_style"):
+    """Sauvegarde une image traitée (recadrée ou détourée) en mode 'replace' ou 'extract'."""
+    if mode == 'replace':
+        dest_name = img_name
+        dest_path = DATASET_DIR / dest_name
+        pil_img.save(dest_path, quality=95)
+        dest_txt = dest_path.with_suffix('.txt')
+    else:
+        stem = Path(img_name).stem
+        ext = Path(img_name).suffix
+        idx = 1
+        while (DATASET_DIR / f"{stem}_{suffix_tag}{idx}{ext}").exists():
+            idx += 1
+        dest_name = f"{stem}_{suffix_tag}{idx}{ext}"
+        dest_path = DATASET_DIR / dest_name
+        pil_img.save(dest_path, quality=95)
+        # On conserve aussi une copie dans originals pour permettre le reset de l'extrait
+        shutil.copy2(dest_path, ORIGINALS_DIR / dest_name)
+        src_txt = (DATASET_DIR / img_name).with_suffix('.txt')
+        dest_txt = dest_path.with_suffix('.txt')
+        if src_txt.exists():
+            shutil.copy2(src_txt, dest_txt)
+        else:
+            dest_txt.write_text(trigger, encoding='utf-8')
+
+    if auto_tag_bg and bg_preset_key in BG_PRESETS:
+        update_caption_bg_tag(dest_txt, BG_PRESETS[bg_preset_key]["tag"], trigger=trigger)
+
+    return dest_name
 
 @app.route('/api/crop', methods=['POST'])
 def api_crop():
@@ -388,7 +475,7 @@ def api_crop():
     h = float(data['h'])
     target_w = int(data.get('target_w', 1024))
     target_h = int(data.get('target_h', 1024))
-    source_type = data.get('source', 'original') # 'original' or 'dataset'
+    source_type = data.get('source', 'dataset')
 
     src_path = ORIGINALS_DIR / img_name if (source_type == 'original' and (ORIGINALS_DIR / img_name).exists()) else DATASET_DIR / img_name
     if not src_path.exists():
@@ -399,28 +486,69 @@ def api_crop():
         crop_box = (int(max(0, x)), int(max(0, y)), int(min(im.width, x + w)), int(min(im.height, y + h)))
         cropped = im.crop(crop_box)
         resized = cropped.resize((target_w, target_h), Image.Resampling.LANCZOS)
+        dest_name = save_processed_image(resized, img_name, mode, suffix_tag="crop")
 
-        if mode == 'replace':
-            dest_name = img_name
-            dest_path = DATASET_DIR / dest_name
-            resized.save(dest_path, quality=95)
-        else:
-            stem = Path(img_name).stem
-            ext = Path(img_name).suffix
-            idx = 1
-            while (DATASET_DIR / f"{stem}_crop{idx}{ext}").exists():
-                idx += 1
-            dest_name = f"{stem}_crop{idx}{ext}"
-            dest_path = DATASET_DIR / dest_name
-            resized.save(dest_path, quality=95)
-            shutil.copy2(src_path, ORIGINALS_DIR / dest_name)
-            src_txt = (DATASET_DIR / img_name).with_suffix('.txt')
-            dest_txt = dest_path.with_suffix('.txt')
-            if src_txt.exists():
-                shutil.copy2(src_txt, dest_txt)
+    return jsonify({"status": "ok", "image": dest_name})
+
+@app.route('/api/cutout', methods=['POST'])
+def api_cutout():
+    """Reçoit une image détourée côté client (DataURL base64 ou polygone), la recadre ou la centre au format SDXL et met à jour le tag de fond."""
+    data = request.json or {}
+    img_name = secure_filename(data.get('image', ''))
+    mode = data.get('mode', 'replace') # 'replace' or 'extract'
+    bg_color = data.get('bg_color', 'white')
+    auto_fit = bool(data.get('auto_fit', True))
+    auto_tag_bg = bool(data.get('auto_tag_bg', True))
+    target_w = int(data.get('target_w', 1024))
+    target_h = int(data.get('target_h', 1024))
+    trigger = data.get('trigger', 'culturax_style').strip()
+    image_b64 = data.get('image_b64', '')
+    bbox = data.get('bbox') # Optionnel: {x, y, w, h} de la zone utile détourée
+
+    src_path = DATASET_DIR / img_name
+    if not src_path.exists():
+        return jsonify({"error": "Image introuvable"}), 404
+
+    bg_rgb = BG_PRESETS.get(bg_color, BG_PRESETS["white"])["rgb"]
+
+    if image_b64:
+        if ',' in image_b64:
+            image_b64 = image_b64.split(',', 1)[1]
+        raw_bytes = base64.b64decode(image_b64)
+        with Image.open(BytesIO(raw_bytes)) as uploaded_im:
+            uploaded_im = uploaded_im.convert("RGBA")
+            if auto_fit and bbox and bbox.get('w', 0) > 10 and bbox.get('h', 0) > 10:
+                # Extraire la boîte englobante du sujet détouré et la placer avec une marge de 6% dans le canevas SDXL cible
+                bx = max(0, int(bbox['x']))
+                by = max(0, int(bbox['y']))
+                bw = min(uploaded_im.width - bx, int(bbox['w']))
+                bh = min(uploaded_im.height - by, int(bbox['h']))
+                subject_crop = uploaded_im.crop((bx, by, bx + bw, by + bh))
+
+                canvas = Image.new("RGB", (target_w, target_h), bg_rgb)
+                pad = 0.88 # Le sujet occupe 88% de la dimension limitante
+                scale = min((target_w * pad) / max(1, bw), (target_h * pad) / max(1, bh))
+                new_w = max(1, int(bw * scale))
+                new_h = max(1, int(bh * scale))
+                subject_resized = subject_crop.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                paste_x = (target_w - new_w) // 2
+                paste_y = (target_h - new_h) // 2
+                canvas.paste(subject_resized, (paste_x, paste_y), subject_resized)
+                final_img = canvas
             else:
-                dest_txt.write_text("culturax_style", encoding='utf-8')
+                canvas = Image.new("RGB", uploaded_im.size, bg_rgb)
+                canvas.paste(uploaded_im, (0, 0), uploaded_im)
+                final_img = canvas
+    else:
+        return jsonify({"error": "Données de masque manquantes"}), 400
 
+    dest_name = save_processed_image(
+        final_img, img_name, mode,
+        suffix_tag="cut",
+        bg_preset_key=bg_color,
+        auto_tag_bg=auto_tag_bg,
+        trigger=trigger
+    )
     return jsonify({"status": "ok", "image": dest_name})
 
 @app.route('/api/reset_crop', methods=['POST'])
