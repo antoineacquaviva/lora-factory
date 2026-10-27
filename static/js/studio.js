@@ -1,10 +1,10 @@
-﻿let appState = { dataset: [], models: [], tags_config: {}, has_gemini_key: false };
+let appState = { dataset: [], models: [], tags_config: {}, has_gemini_key: false };
 let currentModalIndex = -1;
 let cropper = null;
 let currentTargetW = 1024;
 let currentTargetH = 1024;
 let saveTimeout = null;
-let lastAiSuggestions = []; // Garde en mÃ©moire les puces IA de l'image courante
+let lastAiSuggestions = []; // Garde en mémoire les puces IA de l'image courante
 
 async function fetchState() {
     const res = await fetch('api/state');
@@ -20,18 +20,18 @@ function updateGeminiKeyButton() {
     const btn = document.getElementById('btnGeminiKey');
     if (!btn) return;
     if (appState.has_gemini_key) {
-        btn.innerText = 'ðŸ”‘ ClÃ© IA âœ“';
+        btn.innerText = '🔑 Clé IA ✓';
         btn.style.borderColor = '#16a34a';
     } else {
-        btn.innerText = 'ðŸ”‘ ClÃ© IA ?';
+        btn.innerText = '🔑 Clé IA ?';
         btn.style.borderColor = '#ca8a04';
     }
 }
 
 async function promptGeminiKey() {
     const msg = appState.has_gemini_key
-        ? "Une clÃ© API Gemini est dÃ©jÃ  configurÃ©e sur le serveur.\nEntrez une nouvelle clÃ© pour la remplacer (ou laissez vide pour annuler) :"
-        : "Entrez votre clÃ© API Google Gemini (AI Studio) :\nElle sera sauvegardÃ©e sur votre VM dans .gemini_key (ignorÃ© par Git).";
+        ? "Une clé API Gemini est déjà configurée sur le serveur.\nEntrez une nouvelle clé pour la remplacer (ou laissez vide pour annuler) :"
+        : "Entrez votre clé API Google Gemini (AI Studio) :\nElle sera sauvegardée sur votre VM dans .gemini_key (ignoré par Git).";
     const key = prompt(msg);
     if (key === null || key.trim() === '') return;
     const res = await fetch('api/gemini_key', {
@@ -54,15 +54,15 @@ function renderGrid() {
                     <input type="checkbox" class="img-check" value="${item.image}">
                     <span title="${item.image}">${item.image.substring(0, 18)}</span>
                 </label>
-                <button class="btn danger sm" style="padding:2px 6px;" onclick="deleteImage('${item.image}')">âœ•</button>
+                <button class="btn danger sm" style="padding:2px 6px;" onclick="deleteImage('${item.image}')">✕</button>
             </div>
             <div class="thumb-wrap" onclick="openStudio(${idx})">
                 <img src="img/dataset/${encodeURIComponent(item.image)}?t=${item.mtime}" loading="lazy">
-                <span class="dim-tag">${item.width}Ã—${item.height}</span>
-                <div class="studio-overlay">âœ‚ï¸ Ouvrir dans le Studio</div>
+                <span class="dim-tag">${item.width}×${item.height}</span>
+                <div class="studio-overlay">✂️ Ouvrir dans le Studio</div>
             </div>
             <div class="caption-preview" onclick="openStudio(${idx})" style="cursor:pointer;" title="${item.caption}">
-                ${item.caption || '<em style="color:#64748b">Aucune lÃ©gende...</em>'}
+                ${item.caption || '<em style="color:#64748b">Aucune légende...</em>'}
             </div>
         </div>
     `).join('');
@@ -71,13 +71,13 @@ function renderGrid() {
 function renderModels() {
     const list = document.getElementById('modelsList');
     if (!appState.models.length) {
-        list.innerHTML = '<p style="font-size:0.8rem; color:#64748b; margin:0;">Aucun filtre gÃ©nÃ©rÃ©.</p>';
+        list.innerHTML = '<p style="font-size:0.8rem; color:#64748b; margin:0;">Aucun filtre généré.</p>';
         return;
     }
     list.innerHTML = appState.models.map(m => `
         <div class="model-row">
             <span>${m.name} (${m.size_mb} Mo)</span>
-            <a href="models/${encodeURIComponent(m.name)}" download>TÃ©lÃ©charger</a>
+            <a href="models/${encodeURIComponent(m.name)}" download>Télécharger</a>
         </div>
     `).join('');
 }
@@ -102,12 +102,12 @@ function populateCustomCatSelect() {
     if (!sel) return;
     const prev = sel.value;
     const cats = Object.keys(appState.tags_config);
-    if (!cats.includes('PersonnalisÃ©')) cats.push('PersonnalisÃ©');
+    if (!cats.includes('Personnalisé')) cats.push('Personnalisé');
     sel.innerHTML = cats.map(c => `<option value="${c}">${c}</option>`).join('');
     if (prev && cats.includes(prev)) {
         sel.value = prev;
     } else if (cats.length > 1) {
-        sel.value = cats[1]; // SÃ©lectionne par dÃ©faut "2. Sujets & Motifs Figuratifs"
+        sel.value = cats[1]; // Sélectionne par défaut "2. Sujets & Motifs Figuratifs"
     }
 }
 
@@ -117,7 +117,7 @@ function selectAll(checked) {
 
 async function applyBatchTag(action) {
     const tagEn = document.getElementById('batchTagSelect').value;
-    if (!tagEn) return alert('Choisissez un tag dans la liste dÃ©roulante.');
+    if (!tagEn) return alert('Choisissez un tag dans la liste déroulante.');
     const checked = Array.from(document.querySelectorAll('.img-check:checked')).map(cb => cb.value);
     if (!checked.length) return alert('Cochez au moins une image dans la grille.');
     const trigger = document.getElementById('triggerWord').value.trim();
@@ -154,11 +154,11 @@ function openStudio(idx) {
     const item = appState.dataset[idx];
 
     document.getElementById('studioModal').classList.remove('hidden');
-    document.getElementById('modalTitle').innerText = `${idx + 1}/${appState.dataset.length} â€” ${item.image}`;
-    document.getElementById('modalDims').innerText = `Actuel : ${item.width}Ã—${item.height}`;
+    document.getElementById('modalTitle').innerText = `${idx + 1}/${appState.dataset.length} — ${item.image}`;
+    document.getElementById('modalDims').innerText = `Actuel : ${item.width}×${item.height}`;
     document.getElementById('modalCaption').value = item.caption;
 
-    // RÃ©initialise le tiroir Copilote lors du changement d'image
+    // Réinitialise le tiroir Copilote lors du changement d'image
     lastAiSuggestions = [];
     const drawer = document.getElementById('copilotDrawer');
     if (drawer) {
@@ -174,7 +174,7 @@ function openStudio(idx) {
         cropper.destroy();
         cropper = null;
     }
-    imgEl.src = `/img/dataset/${encodeURIComponent(item.image)}?t=${Date.now()}`;
+    imgEl.src = `img/dataset/${encodeURIComponent(item.image)}?t=${Date.now()}`;
     imgEl.onload = () => {
         cropper = new Cropper(imgEl, {
             aspectRatio: currentTargetW / currentTargetH,
@@ -251,7 +251,7 @@ async function resetOriginal() {
         await fetchState();
         openStudio(currentModalIndex);
     } else {
-        alert("Aucun original distinct trouvÃ©.");
+        alert("Aucun original distinct trouvé.");
     }
 }
 
@@ -314,9 +314,9 @@ function renderActiveTokensBar(parts) {
         const isTrigger = (p.toLowerCase() === trigger);
         const safeP = p.replace(/"/g, '&quot;');
         if (isTrigger) {
-            return `<span class="token-chip trigger-chip" title="Mot-clÃ© dÃ©clencheur du style">ðŸ”’ ${p}</span>`;
+            return `<span class="token-chip trigger-chip" title="Mot-clé déclencheur du style">🔒 ${p}</span>`;
         }
-        return `<span class="token-chip" data-token="${safeP}" onclick="removeSingleToken(this.getAttribute('data-token'))" title="Cliquer pour retirer ce tag">${p} âœ•</span>`;
+        return `<span class="token-chip" data-token="${safeP}" onclick="removeSingleToken(this.getAttribute('data-token'))" title="Cliquer pour retirer ce tag">${p} ✕</span>`;
     }).join('');
 }
 
@@ -333,14 +333,14 @@ function toggleTagString(enTagString) {
     const partsLowerSet = new Set(parts.map(p => p.toLowerCase()));
     const subTagsLower = subTags.map(s => s.toLowerCase());
 
-    // Si TOUS les sous-tags de la puce sont prÃ©sents -> on les retire tous
+    // Si TOUS les sous-tags de la puce sont présents -> on les retire tous
     const allPresent = subTagsLower.every(st => partsLowerSet.has(st));
 
     if (allPresent) {
         const toRemove = new Set(subTagsLower);
         parts = parts.filter(p => !toRemove.has(p.toLowerCase()));
     } else {
-        // Sinon -> on ajoute uniquement les sous-tags manquants (zÃ©ro doublon)
+        // Sinon -> on ajoute uniquement les sous-tags manquants (zéro doublon)
         for (const st of subTags) {
             if (!partsLowerSet.has(st.toLowerCase())) {
                 parts.push(st);
@@ -399,10 +399,10 @@ function copyPrevCaption() {
 }
 
 async function addCustomTag(customCategory = null, frVal = null, enVal = null) {
-    const cat = customCategory || document.getElementById('customCat').value || 'PersonnalisÃ©';
+    const cat = customCategory || document.getElementById('customCat').value || 'Personnalisé';
     const fr = (frVal !== null) ? frVal : document.getElementById('customFr').value.trim();
     const en = (enVal !== null) ? enVal : document.getElementById('customEn').value.trim();
-    if (!fr || !en) return alert("Remplissez le libellÃ© FR et sa traduction EN.");
+    if (!fr || !en) return alert("Remplissez le libellé FR et sa traduction EN.");
 
     const res = await fetch('api/custom_tag', {
         method: 'POST',
@@ -438,12 +438,12 @@ async function runAiCopilot(mode) {
     if (mode === 'translate') {
         const inputEl = document.getElementById('quickFrInput');
         const textFr = inputEl.value.trim();
-        if (!textFr) return alert("DÃ©crivez d'abord le sujet en franÃ§ais (ex: chat assis, masque Ã  cornes...).");
+        if (!textFr) return alert("Décrivez d'abord le sujet en français (ex: chat assis, masque à cornes...).");
         payload.text_fr = textFr;
     }
 
     drawer.classList.remove('hidden');
-    drawer.innerHTML = `<div style="color:#38bdf8;">â³ Analyse Gemini en cours (${mode})...</div>`;
+    drawer.innerHTML = `<div style="color:#38bdf8;">⏳ Analyse Gemini en cours (${mode})...</div>`;
 
     try {
         const res = await fetch('api/ai_copilot', {
@@ -454,8 +454,8 @@ async function runAiCopilot(mode) {
         const data = await res.json();
 
         if (!res.ok || data.error) {
-            drawer.innerHTML = `<div style="color:#f87171;">âš ï¸ ${data.error || 'Erreur API'}</div>`;
-            if ((data.error || '').includes('ClÃ© API')) {
+            drawer.innerHTML = `<div style="color:#f87171;">⚠️ ${data.error || 'Erreur API'}</div>`;
+            if ((data.error || '').includes('Clé API')) {
                 promptGeminiKey();
             }
             return;
@@ -467,7 +467,7 @@ async function runAiCopilot(mode) {
             renderAuditDrawer(data);
         } else if (mode === 'translate') {
             document.getElementById('quickFrInput').value = '';
-            // Ajoute directement les tags traduits au .txt et affiche aussi les puces pour pouvoir les Ã©pingler
+            // Ajoute directement les tags traduits au .txt et affiche aussi les puces pour pouvoir les épingler
             if (data.combined_en) {
                 toggleTagString(data.combined_en);
             }
@@ -475,7 +475,7 @@ async function runAiCopilot(mode) {
         }
         syncPillsWithTextarea();
     } catch (err) {
-        drawer.innerHTML = `<div style="color:#f87171;">âš ï¸ Erreur rÃ©seau : ${err.message}</div>`;
+        drawer.innerHTML = `<div style="color:#f87171;">⚠️ Erreur réseau : ${err.message}</div>`;
     }
 }
 
@@ -484,8 +484,8 @@ function renderSuggestDrawer(data) {
     const list = data.suggestions || [];
     let html = `
         <div class="copilot-drawer-header">
-            <span>ðŸ” <strong>Suggestions IA :</strong> ${data.summary_fr || 'Cliquez pour ajouter au .txt (ðŸ“Œ pour sauver en puce permanente)'}</span>
-            <button class="btn secondary sm" style="padding:2px 6px;" onclick="document.getElementById('copilotDrawer').classList.add('hidden')">âœ•</button>
+            <span>🔍 <strong>Suggestions IA :</strong> ${data.summary_fr || 'Cliquez pour ajouter au .txt (📌 pour sauver en puce permanente)'}</span>
+            <button class="btn secondary sm" style="padding:2px 6px;" onclick="document.getElementById('copilotDrawer').classList.add('hidden')">✕</button>
         </div>
         <div class="pills-wrap">
     `;
@@ -495,7 +495,7 @@ function renderSuggestDrawer(data) {
         html += `
             <span class="ai-pill" data-en="${safeEn}" title="Tag EN : ${safeEn}" onclick="togglePill(this)">
                 <span>${s.fr} <small style="opacity:0.75;">(${s.en})</small></span>
-                <span class="pin-btn" title="Ã‰pingler dÃ©finitivement dans mes puces Sujets" onclick="event.stopPropagation(); pinAiTag('${safeFr}', '${safeEn}')">ðŸ“Œ</span>
+                <span class="pin-btn" title="Épingler définitivement dans mes puces Sujets" onclick="event.stopPropagation(); pinAiTag('${safeFr}', '${safeEn}')">📌</span>
             </span>
         `;
     }
@@ -511,20 +511,20 @@ function renderAuditDrawer(data) {
 
     let html = `
         <div class="copilot-drawer-header">
-            <span>ðŸ›¡ï¸ <strong>Audit Dissociation : <span style="color:${scoreColor}">${data.score}/10</span></strong> â€” ${data.verdict_fr}</span>
-            <button class="btn secondary sm" style="padding:2px 6px;" onclick="document.getElementById('copilotDrawer').classList.add('hidden')">âœ•</button>
+            <span>🛡️ <strong>Audit Dissociation : <span style="color:${scoreColor}">${data.score}/10</span></strong> — ${data.verdict_fr}</span>
+            <button class="btn secondary sm" style="padding:2px 6px;" onclick="document.getElementById('copilotDrawer').classList.add('hidden')">✕</button>
         </div>
     `;
 
     if (missing.length > 0) {
-        html += `<div style="margin-top:4px; margin-bottom:4px; color:#94a3b8;">âž• <strong>Oublis dÃ©tectÃ©s</strong> (cliquez pour ajouter et Ã©viter qu'ils ne polluent le style) :</div><div class="pills-wrap">`;
+        html += `<div style="margin-top:4px; margin-bottom:4px; color:#94a3b8;">➕ <strong>Oublis détectés</strong> (cliquez pour ajouter et éviter qu'ils ne polluent le style) :</div><div class="pills-wrap">`;
         for (const m of missing) {
             const safeEn = m.en.replace(/"/g, '&quot;');
             const safeFr = m.fr.replace(/"/g, '&quot;');
             html += `
                 <span class="ai-pill" data-en="${safeEn}" onclick="togglePill(this)">
                     <span>+ ${m.fr} <small style="opacity:0.75;">(${m.en})</small></span>
-                    <span class="pin-btn" title="Ã‰pingler dans mes puces" onclick="event.stopPropagation(); pinAiTag('${safeFr}', '${safeEn}')">ðŸ“Œ</span>
+                    <span class="pin-btn" title="Épingler dans mes puces" onclick="event.stopPropagation(); pinAiTag('${safeFr}', '${safeEn}')">📌</span>
                 </span>
             `;
         }
@@ -532,10 +532,10 @@ function renderAuditDrawer(data) {
     }
 
     if (forbidden.length > 0) {
-        html += `<div style="margin-top:6px; margin-bottom:4px; color:#fca5a5;">âš ï¸ <strong>Tags de style parasites Ã  retirer</strong> (cliquez pour supprimer) :</div><div class="pills-wrap">`;
+        html += `<div style="margin-top:6px; margin-bottom:4px; color:#fca5a5;">⚠️ <strong>Tags de style parasites à retirer</strong> (cliquez pour supprimer) :</div><div class="pills-wrap">`;
         for (const f of forbidden) {
             const safeEn = f.replace(/"/g, '&quot;');
-            html += `<span class="ai-pill danger-pill" data-en="${safeEn}" onclick="removeSingleToken('${safeEn}')">ðŸ—‘ï¸ Retirer "${f}"</span>`;
+            html += `<span class="ai-pill danger-pill" data-en="${safeEn}" onclick="removeSingleToken('${safeEn}')">🗑️ Retirer "${f}"</span>`;
         }
         html += `</div>`;
     }
@@ -548,8 +548,8 @@ function renderTranslateDrawer(data) {
     const tags = data.tags || [];
     let html = `
         <div class="copilot-drawer-header">
-            <span>ðŸŒ <strong>AjoutÃ© au label :</strong> <code>${data.combined_en}</code> (cliquez sur ðŸ“Œ pour conserver une puce)</span>
-            <button class="btn secondary sm" style="padding:2px 6px;" onclick="document.getElementById('copilotDrawer').classList.add('hidden')">âœ•</button>
+            <span>🌐 <strong>Ajouté au label :</strong> <code>${data.combined_en}</code> (cliquez sur 📌 pour conserver une puce)</span>
+            <button class="btn secondary sm" style="padding:2px 6px;" onclick="document.getElementById('copilotDrawer').classList.add('hidden')">✕</button>
         </div>
         <div class="pills-wrap">
     `;
@@ -559,7 +559,7 @@ function renderTranslateDrawer(data) {
         html += `
             <span class="ai-pill active" data-en="${safeEn}" onclick="togglePill(this)">
                 <span>${t.fr} (${t.en})</span>
-                <span class="pin-btn" title="Ã‰pingler dans mes puces Sujets" onclick="event.stopPropagation(); pinAiTag('${safeFr}', '${safeEn}')">ðŸ“Œ</span>
+                <span class="pin-btn" title="Épingler dans mes puces Sujets" onclick="event.stopPropagation(); pinAiTag('${safeFr}', '${safeEn}')">📌</span>
             </span>
         `;
     }
@@ -568,7 +568,7 @@ function renderTranslateDrawer(data) {
 }
 
 async function pinAiTag(fr, en) {
-    const defaultCat = Object.keys(appState.tags_config)[1] || '2. Sujets & Motifs Figuratifs (Le Contenu Ã  dissocier)';
+    const defaultCat = Object.keys(appState.tags_config)[1] || '2. Sujets & Motifs Figuratifs (Le Contenu à dissocier)';
     await addCustomTag(defaultCat, fr, en);
 }
 
@@ -587,7 +587,7 @@ document.addEventListener('keydown', (e) => {
 
 /* === TRAINING & LOGS === */
 async function startTraining() {
-    if (!confirm("Lancer le provisionnement de la VM GPU A10 et dÃ©marrer l'apprentissage ?")) return;
+    if (!confirm("Lancer le provisionnement de la VM GPU A10 et démarrer l'apprentissage ?")) return;
     const payload = {
         trigger: document.getElementById('triggerWord').value,
         steps: document.getElementById('stepsInput').value,
@@ -605,7 +605,7 @@ async function startTraining() {
 }
 
 async function emergencyKill() {
-    if (!confirm("Forcer la destruction immÃ©diate de toute instance GPU en cours ?")) return;
+    if (!confirm("Forcer la destruction immédiate de toute instance GPU en cours ?")) return;
     await fetch('api/kill', { method: 'POST' });
     pollLogs();
 }
@@ -621,11 +621,11 @@ async function pollLogs() {
     const btn = document.getElementById('trainBtn');
     if (data.running) {
         badge.className = 'badge running';
-        badge.innerText = 'ENTRAÃŽNEMENT GPU EN COURS...';
+        badge.innerText = 'ENTRAÎNEMENT GPU EN COURS...';
         btn.disabled = true;
     } else {
         badge.className = 'badge idle';
-        badge.innerText = 'VEILLE / PRÃŠT';
+        badge.innerText = 'VEILLE / PRÊT';
         btn.disabled = false;
     }
 }
@@ -633,4 +633,3 @@ async function pollLogs() {
 fetchState();
 pollLogs();
 setInterval(pollLogs, 3500);
-
