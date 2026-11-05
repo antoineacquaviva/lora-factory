@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <base href="/lora/">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LoRA Factory Studio — OCI</title>
+    <meta name="description" content="Studio d'entraînement SDXL LoRA avec table lumineuse de recadrage/détourage, copilote IA Gemini et étiquetage par lot avec estimation de coût.">
+    <meta property="og:title" content="LoRA Factory Studio — OCI">
+    <meta property="og:description" content="Studio d'entraînement SDXL LoRA avec table lumineuse de recadrage/détourage, copilote IA Gemini et étiquetage par lot avec estimation de coût.">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
     <link rel="stylesheet" href="static/css/style.css">
 </head>
@@ -74,6 +76,7 @@
                         <p class="subtitle">Cliquez sur une vignette pour ouvrir la <strong>Table Lumineuse (Recadrage, Détourage, Extraction de détail & Copilote IA)</strong>.</p>
                     </div>
                     <div class="batch-actions">
+                        <button class="btn accent sm" onclick="openBatchAiModal()" title="Estimer le coût puis poser automatiquement des labels IA sur le lot avec dédoublonnage par rapport aux tags existants">✨ Auto-Label IA du lot (Devis & Pose)</button>
                         <button class="btn secondary sm" onclick="selectAll(true)">Tout cocher</button>
                         <button class="btn secondary sm" onclick="selectAll(false)">Tout décocher</button>
                         <select id="batchTagSelect" class="sm-select"></select>
@@ -94,6 +97,87 @@
             </div>
         </section>
     </main>
+
+    <!-- MODALE DE POSE DE LABELS IA PAR LOT (ESTIMATION DE COÛT & DÉDOUBLONNAGE) -->
+    <div id="batchAiModal" class="modal hidden">
+        <div class="modal-content batch-ai-modal-content">
+            <div class="modal-header">
+                <div class="nav-title">
+                    <span class="modal-filename">✨ Pose de Labels IA par Lot — Estimation de Coût & Dédoublonnage</span>
+                </div>
+                <button class="btn danger sm" onclick="closeBatchAiModal()">✕ Fermer</button>
+            </div>
+            <div class="batch-ai-body">
+                <!-- Configuration du périmètre -->
+                <div class="batch-ai-config-grid">
+                    <div class="batch-ai-box">
+                        <h3>1. Périmètre d'analyse & Options</h3>
+                        <label>Images à analyser par Gemini Vision :</label>
+                        <select id="batchAiScope" onchange="updateBatchAiEstimate()">
+                            <option value="all" id="optScopeAll">Toutes les images du lot</option>
+                            <option value="selected" id="optScopeSelected">Uniquement les images cochées dans la grille</option>
+                            <option value="untagged" id="optScopeUntagged">Uniquement les images sans label descriptif (hors trigger)</option>
+                        </select>
+
+                        <div class="row-2" style="margin-top:8px;">
+                            <div>
+                                <label>Max nouveaux tags / image :</label>
+                                <select id="batchAiMaxTags">
+                                    <option value="4">4 tags (Concis)</option>
+                                    <option value="6" selected>6 tags (Recommandé SDXL)</option>
+                                    <option value="8">8 tags (Détaillé)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label>Mot-clé protégé (en tête) :</label>
+                                <input type="text" id="batchAiTriggerPreview" readonly style="opacity:0.8; cursor:not-allowed;">
+                            </div>
+                        </div>
+
+                        <div class="dedup-guarantee-box">
+                            <strong>🛡️ Garantie de dédoublonnage & préservation :</strong>
+                            <ul>
+                                <li>Les labels existants dans vos fichiers <code>.txt</code> ne sont <strong>jamais écrasés</strong>.</li>
+                                <li>Chaque tag suggéré par l'IA est comparé (insensible à la casse, espaces et pluriels) aux tags déjà présents sur l'image pour éviter tout doublon.</li>
+                                <li>Le style graphique n'est jamais décrit afin de préserver la pureté du trigger word.</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Devis / Estimation préalable du coût -->
+                    <div class="batch-ai-box estimate-card">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <h3>2. Estimation préalable du coût IA</h3>
+                            <button class="btn secondary sm" onclick="promptGeminiKey().then(updateBatchAiEstimate)">🔑 Modèle / Clé</button>
+                        </div>
+                        <div id="batchAiEstimateContent" class="estimate-metrics">
+                            Calcul du devis en cours...
+                        </div>
+                        <div class="batch-ai-actions-row">
+                            <button id="btnStartBatchAi" class="btn accent full" onclick="startBatchAiLabeling()">
+                                🚀 Confirmer & Lancer l'étiquetage IA du lot
+                            </button>
+                            <button id="btnStopBatchAi" class="btn danger full hidden" onclick="stopBatchAiLabeling()">
+                                ⏹️ Interrompre après l'image en cours
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progression et journal de dédoublonnage image par image -->
+                <div id="batchAiProgressSection" class="batch-ai-progress-section hidden">
+                    <div class="progress-header-row">
+                        <span id="batchAiProgressText">Préparation...</span>
+                        <span id="batchAiStatsSummary" class="dim-pill">0 nouveau tag | 0 doublon filtré</span>
+                    </div>
+                    <div class="progress-bar-outer">
+                        <div id="batchAiProgressBar" class="progress-bar-inner" style="width:0%"></div>
+                    </div>
+                    <div id="batchAiResultsList" class="batch-ai-results-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- MODALE STUDIO PLEIN ÉCRAN (Table Lumineuse : Cadrage / Détourage + Constructeur de Tags + Copilote IA) -->
     <div id="studioModal" class="modal hidden">

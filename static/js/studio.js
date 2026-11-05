@@ -1139,6 +1139,263 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeModal();
 });
 
+/* === POSE DE LABELS IA PAR LOT (ESTIMATION PRÉALABLE DU COÛT & DÉDOUBLONNAGE) === */
+let currentBatchEstimate = null;
+let batchAiRunning = false;
+let batchAiAbortRequested = false;
+
+function getCheckedImages() {
+    return Array.from(document.querySelectorAll('.img-check:checked')).map(cb => cb.value);
+}
+
+async function openBatchAiModal() {
+    if (!appState.dataset.length) {
+        return alert("Importez d'abord des images dans le lot d'entraînement.");
+    }
+    const checked = getCheckedImages();
+    const trigger = document.getElementById('triggerWord').value.trim() || 'culturax_style';
+    document.getElementById('batchAiTriggerPreview').value = trigger;
+
+    const optAll = document.getElementById('optScopeAll');
+    const optSel = document.getElementById('optScopeSelected');
+    if (optAll) optAll.textContent = `Toutes les images du lot (${appState.dataset.length} images)`;
+    if (optSel) optSel.textContent = `Uniquement les images cochées (${checked.length} sélectionnée${checked.length > 1 ? 's' : ''})`;
+
+    const scopeSel = document.getElementById('batchAiScope');
+    if (checked.length > 0) {
+        scopeSel.value = 'selected';
+    } else {
+        scopeSel.value = 'all';
+    }
+
+    document.getElementById('batchAiModal').classList.remove('hidden');
+    await updateBatchAiEstimate();
+}
+
+function closeBatchAiModal() {
+    if (batchAiRunning) {
+        if (!confirm("Un étiquetage IA par lot est en cours. Voulez-vous l'interrompre et fermer ?")) return;
+        batchAiAbortRequested = true;
+    }
+    document.getElementById('batchAiModal').classList.add('hidden');
+}
+
+async function updateBatchAiEstimate() {
+    const scope = document.getElementById('batchAiScope').value;
+    const checked = getCheckedImages();
+    const trigger = document.getElementById('triggerWord').value.trim() || 'culturax_style';
+    const box = document.getElementById('batchAiEstimateContent');
+    const btnStart = document.getElementById('btnStartBatchAi');
+
+    box.innerHTML = `<div style="color:#38bdf8;">⏳ Calcul de l'estimation des jetons et du coût API...</div>`;
+
+    try {
+        const res = await fetch('api/ai_batch_estimate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                scope: scope,
+                images: checked,
+                trigger: trigger
+            })
+        });
+        const est = await res.json();
+        if (!res.ok || est.error) {
+            box.innerHTML = `<div style="color:#f87171;">⚠️ ${est.error || 'Erreur lors du calcul du devis'}</div>`;
+            btnStart.disabled = true;
+            return;
+        }
+
+        currentBatchEstimate = est;
+        const count = est.image_count || 0;
+        btnStart.disabled = (count === 0) || batchAiRunning;
+
+        const eurFormatted = est.estimated_cost_eur < 0.01 && est.estimated_cost_eur > 0
+            ? `${est.estimated_cost_eur.toFixed(4).replace('.', ',')} €`
+            : `${est.estimated_cost_eur.toFixed(3).replace('.', ',')} €`;
+        const usdFormatted = `$${est.estimated_cost_usd.toFixed(4)}`;
+
+        const keyWarning = !est.has_gemini_key
+            ? `<div style="background:#450a0a; border:1px solid #ef4444; color:#fecaca; padding:6px 8px; border-radius:6px; font-size:0.75rem;">
+                 ⚠️ Aucune clé API Gemini détectée. Cliquez sur <strong>🔑 Modèle / Clé</strong> ci-dessus avant de lancer.
+               </div>`
+            : '';
+
+        box.innerHTML = `
+            ${keyWarning}
+            <div class="estimate-cost-banner">
+                <div>
+                    <div class="cost-sub">Coût estimé pour <strong>${count} image${count > 1 ? 's' : ''}</strong> (${est.model})</div>
+                    <div class="cost-main">${eurFormatted} <span style="font-size:0.82rem; font-weight:500; color:#cbd5e1;">(${usdFormatted} USD)</span></div>
+                    <div class="cost-sub" style="margin-top:2px; color:#4ade80;">✓ 0,00 € si vous utilisez le quota gratuit AI Studio</div>
+                </div>
+                <div style="text-align:right;">
+                    <span class="dim-pill">⏱️ ~${est.estimated_duration_sec} sec</span>
+                </div>
+            </div>
+
+            <div class="estimate-grid-stats">
+                <div class="estimate-stat-tile">
+                    <span class="stat-label">Images avec labels à dédoublonner</span>
+                    <span class="stat-val">${est.already_tagged_count} / ${count} <small style="font-weight:400; color:#94a3b8;">(${est.untagged_count} vierge${est.untagged_count > 1 ? 's' : ''})</small></span>
+                </div>
+                <div class="estimate-stat-tile">
+                    <span class="stat-label">Volume total de jetons estimé</span>
+                    <span class="stat-val">${est.estimated_total_tokens.toLocaleString('fr-FR')} <small style="font-weight:400; color:#94a3b8;">tok.</small></span>
+                </div>
+                <div class="estimate-stat-tile">
+                    <span class="stat-label">Détail Entrée (Vision 768px + Prompt)</span>
+                    <span class="stat-val">${est.estimated_input_tokens.toLocaleString('fr-FR')} tok. <small style="font-weight:400; color:#94a3b8;">($${est.pricing_per_1m_usd.input}/1M)</small></span>
+                </div>
+                <div class="estimate-stat-tile">
+                    <span class="stat-label">Détail Sortie (JSON structuré)</span>
+                    <span class="stat-val">${est.estimated_output_tokens.toLocaleString('fr-FR')} tok. <small style="font-weight:400; color:#94a3b8;">($${est.pricing_per_1m_usd.output}/1M)</small></span>
+                </div>
+            </div>
+        `;
+    } catch (err) {
+        box.innerHTML = `<div style="color:#f87171;">⚠️ Erreur réseau : ${err.message}</div>`;
+    }
+}
+
+function stopBatchAiLabeling() {
+    batchAiAbortRequested = true;
+    const stopBtn = document.getElementById('btnStopBatchAi');
+    if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.innerText = '⏳ Arrêt en cours après cette image...';
+    }
+}
+
+async function startBatchAiLabeling() {
+    if (!currentBatchEstimate || !currentBatchEstimate.target_images || !currentBatchEstimate.target_images.length) {
+        return alert("Aucune image à traiter dans ce périmètre.");
+    }
+    if (!currentBatchEstimate.has_gemini_key) {
+        await promptGeminiKey();
+        await updateBatchAiEstimate();
+        if (!currentBatchEstimate.has_gemini_key) return;
+    }
+
+    const targetImages = currentBatchEstimate.target_images;
+    const trigger = document.getElementById('triggerWord').value.trim() || 'culturax_style';
+    const maxNewTags = parseInt(document.getElementById('batchAiMaxTags').value, 10) || 6;
+
+    batchAiRunning = true;
+    batchAiAbortRequested = false;
+
+    const btnStart = document.getElementById('btnStartBatchAi');
+    const btnStop = document.getElementById('btnStopBatchAi');
+    const progSec = document.getElementById('batchAiProgressSection');
+    const progBar = document.getElementById('batchAiProgressBar');
+    const progTxt = document.getElementById('batchAiProgressText');
+    const statsSum = document.getElementById('batchAiStatsSummary');
+    const resultsList = document.getElementById('batchAiResultsList');
+
+    btnStart.classList.add('hidden');
+    btnStop.classList.remove('hidden');
+    btnStop.disabled = false;
+    btnStop.innerText = "⏹️ Interrompre après l'image en cours";
+    progSec.classList.remove('hidden');
+    resultsList.innerHTML = '';
+
+    let totalAdded = 0;
+    let totalDedupSkipped = 0;
+    let processedCount = 0;
+
+    for (let i = 0; i < targetImages.length; i++) {
+        if (batchAiAbortRequested) {
+            progTxt.innerText = `⏹️ Lot interrompu par l'utilisateur (${processedCount}/${targetImages.length} images traitées).`;
+            break;
+        }
+
+        const imgName = targetImages[i];
+        const pctBefore = Math.round((i / targetImages.length) * 100);
+        progBar.style.width = `${pctBefore}%`;
+        progTxt.innerText = `🔍 Analyse IA (${i + 1}/${targetImages.length}) : ${imgName}...`;
+
+        try {
+            const res = await fetch('api/ai_batch_label', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    image: imgName,
+                    trigger: trigger,
+                    max_new_tags: maxNewTags
+                })
+            });
+            const data = await res.json();
+            const itemRes = (data.results && data.results[0]) ? data.results[0] : null;
+
+            processedCount++;
+            const pctAfter = Math.round((processedCount / targetImages.length) * 100);
+            progBar.style.width = `${pctAfter}%`;
+
+            if (!res.ok || data.error || !itemRes || itemRes.status === 'error') {
+                const errMsg = itemRes?.error || data.error || 'Erreur API';
+                resultsList.insertAdjacentHTML('afterbegin', `
+                    <div class="batch-result-row" style="border-color:#ef4444;">
+                        <div class="batch-result-top">
+                            <strong style="color:#fca5a5;">⚠️ ${imgName}</strong>
+                            <span style="color:#f87171;">${errMsg}</span>
+                        </div>
+                    </div>
+                `);
+            } else {
+                const added = itemRes.added_tags || [];
+                const skipped = itemRes.skipped_duplicates || [];
+                totalAdded += added.length;
+                totalDedupSkipped += skipped.length;
+
+                statsSum.innerText = `+${totalAdded} tag${totalAdded > 1 ? 's' : ''} ajouté${totalAdded > 1 ? 's' : ''} | ${totalDedupSkipped} doublon${totalDedupSkipped > 1 ? 's' : ''} évité${totalDedupSkipped > 1 ? 's' : ''}`;
+
+                const addedHtml = added.length > 0
+                    ? `<span class="batch-badge-added">+${added.length} ajouté${added.length > 1 ? 's' : ''} : ${added.join(', ')}</span>`
+                    : `<span class="batch-badge-dedup">Aucun nouveau tag nécessaire</span>`;
+
+                const skippedHtml = skipped.length > 0
+                    ? `<span class="batch-badge-dedup" title="Tags déjà présents ignorés : ${skipped.join(', ')}">🛡️ ${skipped.length} doublon${skipped.length > 1 ? 's' : ''} ignoré${skipped.length > 1 ? 's' : ''}</span>`
+                    : '';
+
+                resultsList.insertAdjacentHTML('afterbegin', `
+                    <div class="batch-result-row">
+                        <div class="batch-result-top">
+                            <strong style="color:#38bdf8;">✓ ${imgName}</strong>
+                            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                ${addedHtml}
+                                ${skippedHtml}
+                            </div>
+                        </div>
+                        <div style="color:#94a3b8; font-size:0.73rem;">
+                            <code>${itemRes.final_caption}</code>
+                        </div>
+                    </div>
+                `);
+            }
+        } catch (err) {
+            resultsList.insertAdjacentHTML('afterbegin', `
+                <div class="batch-result-row" style="border-color:#ef4444;">
+                    <div class="batch-result-top">
+                        <strong style="color:#fca5a5;">⚠️ ${imgName}</strong>
+                        <span style="color:#f87171;">Erreur réseau : ${err.message}</span>
+                    </div>
+                </div>
+            `);
+        }
+    }
+
+    if (!batchAiAbortRequested) {
+        progBar.style.width = '100%';
+        progTxt.innerText = `✅ Étiquetage IA terminé sur ${processedCount}/${targetImages.length} image${processedCount > 1 ? 's' : ''} !`;
+    }
+
+    batchAiRunning = false;
+    btnStop.classList.add('hidden');
+    btnStart.classList.remove('hidden');
+    await fetchState();
+    await updateBatchAiEstimate();
+}
+
 /* === TRAINING & LOGS === */
 async function startTraining() {
     if (!confirm("Lancer le provisionnement de la VM GPU A10 et démarrer l'apprentissage ?")) return;
@@ -1188,3 +1445,4 @@ initCutoutCanvasEvents();
 fetchState();
 pollLogs();
 setInterval(pollLogs, 3500);
+

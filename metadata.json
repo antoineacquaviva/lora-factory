@@ -1,0 +1,8 @@
+{
+  "name": "LoRA Factory Studio — OCI",
+  "description": "Studio d'entraînement SDXL LoRA avec table lumineuse de recadrage/détourage, copilote IA Gemini et étiquetage par lot avec estimation de coût.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

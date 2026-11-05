@@ -671,3 +671,208 @@ input[type="text"], input[type="number"], select, textarea {
     border: 1px solid #334155;
     text-align: center;
 }
+
+/* === AJOUTS V4 : MODALE DE POSE DE LABELS IA PAR LOT (ESTIMATION DE COÛT & DÉDOUBLONNAGE) === */
+.batch-ai-modal-content {
+    max-width: 1120px;
+    height: auto;
+    max-height: 90vh;
+}
+
+.batch-ai-body {
+    padding: 18px 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.batch-ai-config-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 860px) {
+    .batch-ai-config-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.batch-ai-box {
+    background: #0f172a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+}
+
+.batch-ai-box h3 {
+    margin: 0 0 10px 0;
+    font-size: 0.95rem;
+    color: #38bdf8;
+}
+
+.dedup-guarantee-box {
+    margin-top: 12px;
+    background: #162032;
+    border: 1px solid #334155;
+    border-left: 3px solid #8b5cf6;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 0.77rem;
+    color: #cbd5e1;
+}
+
+.dedup-guarantee-box ul {
+    margin: 6px 0 0 0;
+    padding-left: 18px;
+}
+
+.dedup-guarantee-box li {
+    margin-bottom: 4px;
+}
+
+.estimate-card {
+    border-color: #4f46e5;
+    background: linear-gradient(180deg, #0f172a 0%, #131c31 100%);
+}
+
+.estimate-metrics {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
+    font-size: 0.82rem;
+}
+
+.estimate-grid-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.estimate-stat-tile {
+    background: #090e1a;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+
+.estimate-stat-tile .stat-label {
+    font-size: 0.72rem;
+    color: #94a3b8;
+    display: block;
+}
+
+.estimate-stat-tile .stat-val {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin-top: 2px;
+    display: block;
+}
+
+.estimate-cost-banner {
+    background: #1e1b4b;
+    border: 1px solid #6366f1;
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.estimate-cost-banner .cost-main {
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #fde047;
+}
+
+.estimate-cost-banner .cost-sub {
+    font-size: 0.73rem;
+    color: #c7d2fe;
+}
+
+.batch-ai-progress-section {
+    background: #0f172a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.progress-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.84rem;
+    font-weight: 600;
+}
+
+.progress-bar-outer {
+    width: 100%;
+    height: 10px;
+    background: #020617;
+    border: 1px solid #334155;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.progress-bar-inner {
+    height: 100%;
+    background: linear-gradient(90deg, #0284c7, #8b5cf6);
+    transition: width 0.25s ease;
+}
+
+.batch-ai-results-list {
+    max-height: 250px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-right: 4px;
+}
+
+.batch-result-row {
+    background: #090e1a;
+    border: 1px solid #1e293b;
+    border-radius: 6px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.78rem;
+}
+
+.batch-result-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.batch-badge-added {
+    background: #064e3b;
+    border: 1px solid #10b981;
+    color: #a7f3d0;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.batch-badge-dedup {
+    background: #1e293b;
+    border: 1px solid #475569;
+    color: #94a3b8;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 0.72rem;
+}
+

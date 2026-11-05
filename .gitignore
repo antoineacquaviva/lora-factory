@@ -11,3 +11,7 @@ __pycache__/
 
 .env
 .gemini_key
+.gemini_model
+node_modules/
+dist/
+
