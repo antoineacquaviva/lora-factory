@@ -32,7 +32,17 @@
             </section>
 
             <section class="card">
-                <h2>2. Réglages d'itération LoRA</h2>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <h2 style="margin:0;">2. Entraînement LoRA</h2>
+                    <button class="btn secondary sm" id="btnRunpodKey" onclick="promptRunpodKey()" title="Configurer la clé API RunPod.io">🔑 Clé RunPod</button>
+                </div>
+
+                <label>Fournisseur / Mode GPU</label>
+                <select id="providerInput" onchange="onGpuProviderChange()">
+                    <option value="runpod" selected>RunPod (API automatique - 24 Go VRAM)</option>
+                    <option value="colab">Google Colab (Gratuit - T4 16 Go VRAM)</option>
+                </select>
+
                 <label>Mot-clé déclencheur (Trigger Word)</label>
                 <input type="text" id="triggerWord" value="culturax_style">
 
@@ -58,7 +68,44 @@
                     <option value="5e-5">5e-5 (Subtil / Doux)</option>
                 </select>
 
-                <button id="trainBtn" class="btn accent full" onclick="startTraining()">🚀 Lancer l'entraînement GPU (~1,80 €)</button>
+                <!-- Zone spécifique RunPod (24 Go VRAM) -->
+                <div id="runpodConfigZone">
+                    <label>Cible GPU RunPod (24 Go VRAM)</label>
+                    <select id="gpuInput">
+                        <option value="AUTO" selected>⚡ Auto (RTX 4090 → A5000 → RTX 3090)</option>
+                        <option value="NVIDIA GeForce RTX 4090">RTX 4090 (24 Go — Ultra rapide ~0,69 $/h)</option>
+                        <option value="NVIDIA RTX A5000">RTX A5000 (24 Go — Économique ~0,29 $/h)</option>
+                        <option value="NVIDIA GeForce RTX 3090">RTX 3090 (24 Go — ~0,32 $/h)</option>
+                        <option value="NVIDIA RTX A6000">RTX A6000 (48 Go — ~0,49 $/h)</option>
+                    </select>
+                </div>
+
+                <!-- Zone spécifique Pont Google Colab (Gratuit - Tesla T4 15 Go VRAM) -->
+                <div id="colabConfigZone" class="colab-bridge-box hidden">
+                    <div class="colab-bridge-header">
+                        <span>🔌 <strong>Pont Worker Colab (Tesla T4 15 Go)</strong></span>
+                        <span class="colab-pill-free">0,00 €</span>
+                    </div>
+                    <label style="margin-top:6px;">URL publique de votre Studio :</label>
+                    <input type="text" id="colabStudioUrl" placeholder="https://votre-domaine/lora">
+
+                    <label style="margin-top:6px;">Jeton de sécurité (<code>COLAB_BRIDGE_TOKEN</code>) :</label>
+                    <div class="colab-token-row">
+                        <input type="text" id="colabBridgeToken" readonly>
+                        <button class="btn secondary sm" onclick="copyColabToken()" title="Copier le jeton">📋</button>
+                        <button class="btn secondary sm" onclick="regenerateColabToken()" title="Régénérer un nouveau jeton">🔄</button>
+                    </div>
+
+                    <button type="button" class="btn primary full" style="margin-top:10px;" onclick="downloadColabNotebook()">
+                        📓 Télécharger le Notebook Worker Colab (.ipynb)
+                    </button>
+                    <p class="colab-help-note">
+                        1. Cliquez sur <strong>🚀 Lancer l'entraînement GPU</strong> ci-dessous (état <code>WAITING_FOR_COLAB</code>).<br>
+                        2. Ouvrez le <code>.ipynb</code> dans Google Colab (GPU T4) et cliquez sur <em>Tout exécuter</em>.
+                    </p>
+                </div>
+
+                <button id="trainBtn" class="btn accent full" onclick="startTraining()">🚀 Lancer l'entraînement GPU (~0,35 €)</button>
             </section>
 
             <section class="card">
@@ -77,6 +124,7 @@
                     </div>
                     <div class="batch-actions">
                         <button class="btn accent sm" onclick="openBatchAiModal()" title="Estimer le coût puis poser automatiquement des labels IA sur le lot avec dédoublonnage par rapport aux tags existants">✨ Auto-Label IA du lot (Devis & Pose)</button>
+                        <button class="btn secondary sm" onclick="exportDatasetZip()" title="Télécharger tout le dataset (images + .txt) prêt au format Kohya (10_trigger)">📦 Exporter .zip</button>
                         <button class="btn secondary sm" onclick="selectAll(true)">Tout cocher</button>
                         <button class="btn secondary sm" onclick="selectAll(false)">Tout décocher</button>
                         <select id="batchTagSelect" class="sm-select"></select>
@@ -90,7 +138,7 @@
 
             <div class="card">
                 <div class="toolbar">
-                    <h2>Console d'orchestration OCI & Logs GPU en direct</h2>
+                    <h2>Console d'orchestration GPU (RunPod.io) & Logs Kohya en direct</h2>
                     <button class="btn secondary sm" onclick="pollLogs()">🔄 Rafraîchir</button>
                 </div>
                 <pre id="logsBox">En attente de lancement...</pre>

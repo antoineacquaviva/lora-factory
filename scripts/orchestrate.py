@@ -1,120 +1,321 @@
 #!/usr/bin/env python3
 import os
-import oci
+import sys
+import json
 import time
 import zipfile
 import subprocess
+import urllib.request
+import urllib.error
 from pathlib import Path
 
-COMPARTMENT_ID = "ocid1.tenancy.oc1..aaaaaaaalxubpmf6ftgnymkcvjzoiwfcs4ji4iyjfedpa337byo3u4j5htuq"
-AD_NAME = "Tyit:EU-PARIS-1-AD-1"
-CURRENT_VNIC_ID = "ocid1.vnic.oc1.eu-paris-1.abrwiljrqzmzrh2n5f2kksty76qaap6iok4kih66miesycqbnb5ligoxwx5q"
-GPU_SHAPE = "VM.GPU.A10.1"
 DISPLAY_NAME = "gpu-ephemere-lora-worker"
+DOCKER_IMAGE = "runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04"
 
-BASE_DIR = Path.home() / "lora-factory"
+# Résolution dynamique du dossier du projet (compatible VM Oracle /home/opc/lora-factory et AI Studio)
+BASE_DIR = Path(__file__).resolve().parent.parent
 DATASET_DIR = BASE_DIR / "dataset"
 MODELS_DIR = BASE_DIR / "models"
 WORKER_SCRIPT = BASE_DIR / "scripts" / "gpu_worker_run.sh"
-SSH_KEY_PRIV = Path.home() / ".ssh" / "id_gpu_worker"
-SSH_KEY_PUB = Path.home() / ".ssh" / "id_gpu_worker.pub"
+RUNPOD_KEY_FILE = BASE_DIR / ".runpod_key"
+RUNPOD_GPU_FILE = BASE_DIR / ".runpod_gpu"
+ACTIVE_POD_FILE = BASE_DIR / "runpod_pod.id"
 
-def get_oci_clients():
-    config = oci.config.from_file()
-    return oci.core.ComputeClient(config), oci.core.VirtualNetworkClient(config)
+SSH_DIR = Path.home() / ".ssh"
+SSH_KEY_PRIV = SSH_DIR / "id_gpu_worker"
+SSH_KEY_PUB = SSH_DIR / "id_gpu_worker.pub"
 
-def discover_subnet_and_image(compute, network):
-    print("[*] Découverte automatique du Subnet ID...")
-    subnet_id = network.get_vnic(CURRENT_VNIC_ID).data.subnet_id
-    print(f"    -> Subnet ID : {subnet_id}")
-    images = compute.list_images(
-        COMPARTMENT_ID, operating_system="Canonical Ubuntu",
-        operating_system_version="22.04", shape=GPU_SHAPE,
-        sort_by="TIMECREATED", sort_order="DESC"
-    ).data
-    if not images:
-        raise RuntimeError("Aucune image Ubuntu trouvée pour le GPU.")
-    print(f"    -> Image : {images[0].display_name}")
-    return subnet_id, images[0].id
+# Liste de priorité des GPU 24 Go+ VRAM sur RunPod (du meilleur rapport vitesse/prix au plus disponible)
+DEFAULT_GPU_CANDIDATES = [
+    "NVIDIA GeForce RTX 4090",
+    "NVIDIA RTX A5000",
+    "NVIDIA GeForce RTX 3090",
+    "NVIDIA GeForce RTX 3090 Ti",
+    "NVIDIA RTX A6000",
+    "NVIDIA A40",
+    "NVIDIA L4",
+]
 
-def zip_dataset(zip_path):
+
+def get_runpod_api_key() -> str:
+    env_key = os.environ.get("RUNPOD_API_KEY", "").strip()
+    if env_key:
+        return env_key
+    if RUNPOD_KEY_FILE.exists():
+        return RUNPOD_KEY_FILE.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def get_preferred_gpu() -> str:
+    env_gpu = os.environ.get("RUNPOD_GPU", "").strip()
+    if env_gpu:
+        return env_gpu
+    if RUNPOD_GPU_FILE.exists():
+        return RUNPOD_GPU_FILE.read_text(encoding="utf-8").strip()
+    return "AUTO"
+
+
+def ensure_ssh_keypair() -> str:
+    SSH_DIR.mkdir(parents=True, exist_ok=True)
+    if not SSH_KEY_PRIV.exists() or not SSH_KEY_PUB.exists():
+        print("[*] Génération automatique de la clé SSH dédiée au worker GPU (~/.ssh/id_gpu_worker)...")
+        subprocess.run(
+            ["ssh-keygen", "-t", "ed25519", "-N", "", "-f", str(SSH_KEY_PRIV)],
+            check=True,
+        )
+    os.chmod(SSH_KEY_PRIV, 0o600)
+    return SSH_KEY_PUB.read_text(encoding="utf-8").strip()
+
+
+def runpod_graphql(api_key: str, query: str, variables: dict = None) -> dict:
+    url = f"https://api.runpod.io/graphql?api_key={api_key}"
+    payload = {"query": query}
+    if variables is not None:
+        payload["variables"] = variables
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "lora-factory-studio/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=35) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if "errors" in data and data["errors"]:
+                err_msg = "; ".join(e.get("message", str(e)) for e in data["errors"])
+                raise RuntimeError(err_msg)
+            return data.get("data", {})
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Erreur HTTP RunPod ({e.code}) : {body}")
+
+
+def zip_dataset(zip_path: Path):
     files = [f for f in DATASET_DIR.glob("*") if f.is_file()]
     if not files:
-        raise RuntimeError(f"Le dossier {DATASET_DIR} est vide !")
-    print(f"[*] Compression de {len(files)} fichiers...")
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        raise RuntimeError(f"Le dossier {DATASET_DIR} est vide ! Importez d'abord des images.")
+    print(f"[*] Compression de {len(files)} fichiers (images + labels .txt)...")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for file in files:
             zf.write(file, arcname=file.name)
 
-def run_ssh_cmd(ip, user, command):
-    subprocess.run([
-        "ssh", "-i", str(SSH_KEY_PRIV), "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10",
-        f"{user}@{ip}", command
-    ], check=True)
+
+def launch_runpod_gpu(api_key: str, ssh_pub_key: str) -> tuple[str, str]:
+    preferred = get_preferred_gpu()
+    if preferred and preferred != "AUTO":
+        candidates = [preferred] + [g for g in DEFAULT_GPU_CANDIDATES if g != preferred]
+    else:
+        candidates = list(DEFAULT_GPU_CANDIDATES)
+
+    mutation = """
+    mutation LaunchPod($input: PodFindAndDeployOnDemandInput!) {
+      podFindAndDeployOnDemand(input: $input) {
+        id
+        name
+        imageName
+        machineId
+        costPerHr
+      }
+    }
+    """
+
+    last_err = None
+    for gpu_type in candidates:
+        for cloud_type in ["ALL", "COMMUNITY", "SECURE"]:
+            print(f"[*] Recherche d'un GPU disponible : {gpu_type} (Cloud: {cloud_type})...")
+            pod_input = {
+                "cloudType": cloud_type,
+                "gpuCount": 1,
+                "volumeInGb": 0,
+                "containerDiskInGb": 45,
+                "minVcpuCount": 4,
+                "minMemoryInGb": 24,
+                "gpuTypeId": gpu_type,
+                "name": DISPLAY_NAME,
+                "imageName": DOCKER_IMAGE,
+                "dockerArgs": "",
+                "ports": "22/tcp",
+                "volumeMountPath": "/workspace",
+                "startSsh": True,
+                "env": [
+                    {"key": "PUBLIC_KEY", "value": ssh_pub_key},
+                ],
+            }
+            try:
+                res = runpod_graphql(api_key, mutation, {"input": pod_input})
+                pod = res.get("podFindAndDeployOnDemand")
+                if pod and pod.get("id"):
+                    cost = pod.get("costPerHr", "?")
+                    print(f"    -> [OK] Pod GPU créé : {pod['id']} sur {gpu_type} (~{cost} $/h)")
+                    return pod["id"], gpu_type
+            except Exception as e:
+                last_err = str(e)
+                print(f"    -> Indisponible sur {gpu_type} ({cloud_type}) : {last_err}")
+                if "unauthenticated" in last_err.lower() or "unauthorized" in last_err.lower() or "balance" in last_err.lower() or "funds" in last_err.lower():
+                    raise RuntimeError(f"Erreur compte/clé RunPod : {last_err}")
+
+    raise RuntimeError(f"Aucun GPU 24 Go disponible pour le moment sur RunPod. Dernier message : {last_err}")
+
+
+def wait_for_pod_ssh(api_key: str, pod_id: str, timeout_sec: int = 420) -> tuple[str, int]:
+    query = """
+    query GetPod($podId: String!) {
+      pod(input: { podId: $podId }) {
+        id
+        desiredStatus
+        runtime {
+          uptimeInSeconds
+          ports {
+            ip
+            isIpPublic
+            privatePort
+            publicPort
+            type
+          }
+        }
+      }
+    }
+    """
+    print("[*] Attente du démarrage du conteneur PyTorch CUDA et de l'ouverture du port SSH...")
+    start = time.time()
+    while time.time() - start < timeout_sec:
+        res = runpod_graphql(api_key, query, {"podId": pod_id})
+        pod = res.get("pod")
+        if not pod:
+            raise RuntimeError(f"Le pod {pod_id} n'existe plus sur RunPod.")
+        runtime = pod.get("runtime")
+        if runtime and runtime.get("ports"):
+            for p in runtime["ports"]:
+                if p.get("privatePort") == 22 and p.get("isIpPublic") and p.get("ip") and p.get("publicPort"):
+                    return p["ip"], int(p["publicPort"])
+        time.sleep(6)
+
+    raise TimeoutError("Délai dépassé (7 min) en attendant l'IP SSH publique du Pod RunPod.")
+
+
+def terminate_runpod_pod(api_key: str, pod_id: str):
+    mutation = """
+    mutation TerminatePod($input: PodTerminateInput!) {
+      podTerminate(input: $input)
+    }
+    """
+    runpod_graphql(api_key, mutation, {"input": {"podId": pod_id}})
+
+
+def run_ssh_cmd(ip: str, port: int, command: str):
+    subprocess.run(
+        [
+            "ssh",
+            "-i", str(SSH_KEY_PRIV),
+            "-p", str(port),
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "ConnectTimeout=12",
+            f"root@{ip}",
+            command,
+        ],
+        check=True,
+    )
+
+
+def run_scp_upload(ip: str, port: int, local_path: Path, remote_path: str):
+    subprocess.run(
+        [
+            "scp",
+            "-i", str(SSH_KEY_PRIV),
+            "-P", str(port),
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            str(local_path),
+            f"root@{ip}:{remote_path}",
+        ],
+        check=True,
+    )
+
+
+def run_scp_download(ip: str, port: int, remote_path: str, local_path: Path):
+    subprocess.run(
+        [
+            "scp",
+            "-i", str(SSH_KEY_PRIV),
+            "-P", str(port),
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            f"root@{ip}:{remote_path}",
+            str(local_path),
+        ],
+        check=True,
+    )
+
 
 def main():
+    api_key = get_runpod_api_key()
+    if not api_key:
+        print("[!] ERREUR : Clé API RunPod manquante !")
+        print("    -> Cliquez sur le bouton '🔑 Clé RunPod GPU' dans la colonne de gauche du Studio")
+        print("    -> Ou collez votre clé API RunPod (https://www.runpod.io/console/user/settings) pour continuer.")
+        sys.exit(1)
+
     zip_path = Path("/tmp/dataset.zip")
     zip_dataset(zip_path)
-    compute, network = get_oci_clients()
-    subnet_id, image_id = discover_subnet_and_image(compute, network)
-    ssh_pub_key = SSH_KEY_PUB.read_text().strip()
+    ssh_pub_key = ensure_ssh_keypair()
 
     steps = os.environ.get("LORA_STEPS", "1200")
     lr = os.environ.get("LORA_LR", "1e-4")
     dim = os.environ.get("LORA_DIM", "32")
     trigger = os.environ.get("LORA_TRIGGER", "culturax_style")
 
-    instance_id = None
+    pod_id = None
     try:
-        print(f"[*] Provisionnement de {GPU_SHAPE} (~2,00 $/h)...")
-        launch_details = oci.core.models.LaunchInstanceDetails(
-            compartment_id=COMPARTMENT_ID, availability_domain=AD_NAME,
-            shape=GPU_SHAPE, display_name=DISPLAY_NAME, image_id=image_id,
-            create_vnic_details=oci.core.models.CreateVnicDetails(subnet_id=subnet_id, assign_public_ip=True),
-            metadata={"ssh_authorized_keys": ssh_pub_key},
-            source_details=oci.core.models.InstanceSourceViaImageDetails(image_id=image_id, boot_volume_size_in_gbs=100)
-        )
-        instance_id = compute.launch_instance(launch_details).data.id
-        print(f"    -> Instance créée ({instance_id}). Démarrage...")
-        oci.wait_until(compute, compute.get_instance(instance_id), 'lifecycle_state', 'RUNNING', max_wait_seconds=600)
-        
-        vnic_id = compute.list_vnic_attachments(COMPARTMENT_ID, instance_id=instance_id).data[0].vnic_id
-        gpu_ip = network.get_vnic(vnic_id).data.private_ip
-        print(f"    -> VM GPU active sur IP locale : {gpu_ip}")
+        pod_id, gpu_name = launch_runpod_gpu(api_key, ssh_pub_key)
+        ACTIVE_POD_FILE.write_text(pod_id, encoding="utf-8")
 
+        ssh_ip, ssh_port = wait_for_pod_ssh(api_key, pod_id)
+        print(f"    -> Pod GPU actif ! Connexion SSH : root@{ssh_ip}:{ssh_port}")
+
+        print("[*] Vérification de la disponibilité du démon SSH...")
         for _ in range(30):
             try:
-                run_ssh_cmd(gpu_ip, "ubuntu", "echo 'SSH OK'")
+                run_ssh_cmd(ssh_ip, ssh_port, "echo 'SSH OK' && nvidia-smi --query-gpu=name,memory.total --format=csv,noheader")
                 break
             except subprocess.CalledProcessError:
-                time.sleep(10)
+                time.sleep(6)
         else:
-            raise TimeoutError("Timeout SSH sur la VM GPU.")
+            raise TimeoutError("Impossible d'établir la session SSH avec le Pod GPU.")
 
-        print("[*] Installation des pilotes NVIDIA sur la VM GPU...")
-        run_ssh_cmd(gpu_ip, "ubuntu", "sudo apt-get update -qq && sudo apt-get install -y -qq unzip python3-venv nvidia-driver-535 && sudo modprobe nvidia")
+        print("[*] Transfert SCP du dataset compressé et du script d'entraînement Kohya...")
+        run_scp_upload(ssh_ip, ssh_port, zip_path, "/tmp/dataset.zip")
+        run_scp_upload(ssh_ip, ssh_port, WORKER_SCRIPT, "/tmp/gpu_worker_run.sh")
 
-        print("[*] Transfert SCP du dataset et du script...")
-        scp_base = ["scp", "-i", str(SSH_KEY_PRIV), "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"]
-        subprocess.run(scp_base + [str(zip_path), f"ubuntu@{gpu_ip}:/tmp/dataset.zip"], check=True)
-        subprocess.run(scp_base + [str(WORKER_SCRIPT), f"ubuntu@{gpu_ip}:/tmp/gpu_worker_run.sh"], check=True)
+        print(f"[*] Lancement du Fine-Tuning SDXL LoRA sur {gpu_name} (Steps={steps}, LR={lr}, Dim={dim}, Trigger={trigger})...")
+        run_ssh_cmd(
+            ssh_ip,
+            ssh_port,
+            f"chmod +x /tmp/gpu_worker_run.sh && /tmp/gpu_worker_run.sh {steps} {lr} {dim} {trigger}",
+        )
 
-        print("[*] Lancement de l'entraînement !")
-        run_ssh_cmd(gpu_ip, "ubuntu", f"chmod +x /tmp/gpu_worker_run.sh && /tmp/gpu_worker_run.sh {steps} {lr} {dim} {trigger}")
-
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = time.strftime("%Y%m%d-%H%M")
         local_model = MODELS_DIR / f"filtre_culturel_{timestamp}.safetensors"
-        subprocess.run(scp_base + [f"ubuntu@{gpu_ip}:/tmp/lora_work/output/filtre_culturel_v1.safetensors", str(local_model)], check=True)
-        print(f"[+] SUCCÈS ! Modèle sauvegardé : {local_model}")
+        print("[*] Rapatriement du modèle .safetensors vers votre serveur...")
+        run_scp_download(ssh_ip, ssh_port, "/tmp/lora_work/output/filtre_culturel_v1.safetensors", local_model)
+        print(f"[+] SUCCÈS TOTAL ! Modèle LoRA sauvegardé : {local_model.name}")
+
     finally:
-        if instance_id:
-            print(f"\n[!] GARDE-FOU : Destruction immédiate de l'instance GPU ({instance_id})...")
+        if pod_id:
+            print(f"\n[!] GARDE-FOU : Destruction immédiate du Pod GPU RunPod ({pod_id})...")
             try:
-                compute.terminate_instance(instance_id, preserve_boot_volume=False)
-                print("    -> Instance détruite. Facturation stoppée.")
+                terminate_runpod_pod(api_key, pod_id)
+                if ACTIVE_POD_FILE.exists():
+                    ACTIVE_POD_FILE.unlink()
+                print("    -> Pod détruit avec succès. Facturation GPU stoppée à la seconde.")
             except Exception as e:
-                print(f"    -> ERREUR : {e}. Le Cron prendra le relais.")
+                print(f"    -> ERREUR lors de la destruction automatique : {e}. Utilisez le bouton Kill Switch.")
+
 
 if __name__ == "__main__":
     main()

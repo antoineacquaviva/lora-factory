@@ -12,6 +12,13 @@ __pycache__/
 .env
 .gemini_key
 .gemini_model
+.runpod_key
+.runpod_gpu
+runpod_pod.id
+.colab_token
+colab_job.json
 node_modules/
 dist/
+
+
 

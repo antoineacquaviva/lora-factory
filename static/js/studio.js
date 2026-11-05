@@ -41,6 +41,7 @@ async function fetchState() {
     populateBatchSelect();
     populateCustomCatSelect();
     updateGeminiKeyButton();
+    updateRunpodKeyButton();
 }
 
 function updateGeminiKeyButton() {
@@ -54,6 +55,118 @@ function updateGeminiKeyButton() {
         btn.innerText = `🔑 Clé IA ?`;
         btn.style.borderColor = '#ca8a04';
     }
+}
+
+function updateRunpodKeyButton() {
+    const btn = document.getElementById('btnRunpodKey');
+    if (btn) {
+        if (appState.has_runpod_key) {
+            btn.innerText = `🔑 RunPod ✓`;
+            btn.style.borderColor = '#16a34a';
+        } else {
+            btn.innerText = `🔑 Clé RunPod ?`;
+            btn.style.borderColor = '#ca8a04';
+        }
+    }
+    const gpuSel = document.getElementById('gpuInput');
+    if (gpuSel && appState.runpod_gpu) {
+        gpuSel.value = appState.runpod_gpu;
+    }
+    const tokInput = document.getElementById('colabBridgeToken');
+    if (tokInput && appState.colab_token) {
+        tokInput.value = appState.colab_token;
+    }
+    const urlInput = document.getElementById('colabStudioUrl');
+    if (urlInput && !urlInput.value) {
+        const basePath = window.location.pathname.startsWith('/lora') ? '/lora' : '';
+        urlInput.value = `${window.location.origin}${basePath}`;
+    }
+    // Si un job Colab est actif/en attente au chargement, sélectionner automatiquement le mode Colab
+    if (appState.colab_job && (appState.colab_job.status === 'WAITING_FOR_COLAB' || appState.colab_job.status === 'RUNNING_ON_COLAB')) {
+        const provSel = document.getElementById('providerInput');
+        if (provSel && provSel.value !== 'colab') {
+            provSel.value = 'colab';
+            onGpuProviderChange();
+        }
+    }
+}
+
+function onGpuProviderChange() {
+    const provider = document.getElementById('providerInput')?.value || 'runpod';
+    const runpodZone = document.getElementById('runpodConfigZone');
+    const colabZone = document.getElementById('colabConfigZone');
+    const btnRunpodKey = document.getElementById('btnRunpodKey');
+    const trainBtn = document.getElementById('trainBtn');
+
+    if (provider === 'colab') {
+        runpodZone?.classList.add('hidden');
+        btnRunpodKey?.classList.add('hidden');
+        colabZone?.classList.remove('hidden');
+        if (trainBtn) {
+            trainBtn.innerText = "🚀 Lancer l'entraînement GPU (Pont Colab Gratuit)";
+        }
+    } else {
+        colabZone?.classList.add('hidden');
+        runpodZone?.classList.remove('hidden');
+        btnRunpodKey?.classList.remove('hidden');
+        if (trainBtn) {
+            trainBtn.innerText = "🚀 Lancer l'entraînement GPU (~0,35 €)";
+        }
+    }
+}
+
+function copyColabToken() {
+    const tok = document.getElementById('colabBridgeToken')?.value || '';
+    if (!tok) return;
+    navigator.clipboard.writeText(tok);
+}
+
+async function regenerateColabToken() {
+    if (!confirm("Régénérer un nouveau jeton COLAB_BRIDGE_TOKEN ? (Vous devrez re-télécharger le Notebook Colab .ipynb)")) return;
+    const res = await fetch('api/colab/regenerate_token', { method: 'POST' });
+    const data = await res.json();
+    if (data.colab_token) {
+        appState.colab_token = data.colab_token;
+        document.getElementById('colabBridgeToken').value = data.colab_token;
+    }
+}
+
+function downloadColabNotebook() {
+    const urlInput = document.getElementById('colabStudioUrl');
+    const studioUrl = (urlInput?.value || window.location.origin).trim();
+    window.location.href = `api/colab/notebook?studio_url=${encodeURIComponent(studioUrl)}`;
+}
+
+async function promptRunpodKey() {
+    const keyMsg = appState.has_runpod_key
+        ? "Une clé API RunPod.io est déjà configurée sur le serveur.\nEntrez une nouvelle clé pour la remplacer, ou laissez VIDE pour la conserver :"
+        : "Entrez votre clé API RunPod.io (disponible dans RunPod > Settings > API Keys) :";
+    const key = prompt(keyMsg);
+    if (key === null) return;
+
+    const gpuSel = document.getElementById('gpuInput');
+    const gpuVal = gpuSel ? gpuSel.value : 'AUTO';
+
+    const res = await fetch('api/runpod_key', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            api_key: key.trim(),
+            gpu: gpuVal
+        })
+    });
+    const data = await res.json();
+    appState.has_runpod_key = data.has_runpod_key;
+    appState.runpod_gpu = data.runpod_gpu;
+    updateRunpodKeyButton();
+}
+
+function exportDatasetZip() {
+    if (!appState.dataset.length) {
+        return alert("Aucune image dans le lot à exporter.");
+    }
+    const trigger = document.getElementById('triggerWord').value.trim() || 'culturax_style';
+    window.location.href = `api/export_dataset?trigger=${encodeURIComponent(trigger)}`;
 }
 
 async function promptGeminiKey() {
@@ -1397,13 +1510,29 @@ async function startBatchAiLabeling() {
 }
 
 /* === TRAINING & LOGS === */
+let lastColabStatus = 'IDLE';
+
 async function startTraining() {
-    if (!confirm("Lancer le provisionnement de la VM GPU A10 et démarrer l'apprentissage ?")) return;
+    const provider = document.getElementById('providerInput')?.value || 'runpod';
+    const gpuChoice = document.getElementById('gpuInput')?.value || 'AUTO';
+
+    if (provider === 'runpod') {
+        if (!appState.has_runpod_key) {
+            await promptRunpodKey();
+            if (!appState.has_runpod_key) return;
+        }
+        if (!confirm(`Lancer le provisionnement d'un Pod GPU RunPod (${gpuChoice}) et démarrer l'apprentissage SDXL LoRA ?`)) return;
+    } else {
+        if (!confirm("Préparer le lot (/tmp/dataset.zip + profil Kohya Tesla T4 15 Go) et mettre le Studio en attente du Notebook Google Colab (WAITING_FOR_COLAB) ?")) return;
+    }
+
     const payload = {
+        provider: provider,
         trigger: document.getElementById('triggerWord').value,
         steps: document.getElementById('stepsInput').value,
         lr: document.getElementById('lrInput').value,
-        dim: document.getElementById('dimInput').value
+        dim: document.getElementById('dimInput').value,
+        gpu: gpuChoice
     };
     const res = await fetch('api/train', {
         method: 'POST',
@@ -1416,7 +1545,7 @@ async function startTraining() {
 }
 
 async function emergencyKill() {
-    if (!confirm("Forcer la destruction immédiate de toute instance GPU en cours ?")) return;
+    if (!confirm("Activer le coupe-circuit d'urgence (arrêt immédiat du Pod RunPod ou du Worker Google Colab en cours) ?")) return;
     await fetch('api/kill', { method: 'POST' });
     pollLogs();
 }
@@ -1428,11 +1557,22 @@ async function pollLogs() {
     box.textContent = data.logs || "En attente de lancement...";
     box.scrollTop = box.scrollHeight;
 
+    if (lastColabStatus === 'RUNNING_ON_COLAB' && data.colab_status === 'COMPLETED') {
+        fetchState();
+    }
+    lastColabStatus = data.colab_status || 'IDLE';
+
     const badge = document.getElementById('statusBadge');
     const btn = document.getElementById('trainBtn');
     if (data.running) {
         badge.className = 'badge running';
-        badge.innerText = 'ENTRAÎNEMENT GPU EN COURS...';
+        if (data.colab_status === 'WAITING_FOR_COLAB') {
+            badge.innerText = 'EN ATTENTE DE COLAB (WAITING)...';
+        } else if (data.colab_status === 'RUNNING_ON_COLAB') {
+            badge.innerText = 'ENTRAÎNEMENT COLAB T4 EN COURS...';
+        } else {
+            badge.innerText = 'ENTRAÎNEMENT GPU EN COURS...';
+        }
         btn.disabled = true;
     } else {
         badge.className = 'badge idle';

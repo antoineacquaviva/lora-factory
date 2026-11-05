@@ -876,3 +876,51 @@ input[type="text"], input[type="number"], select, textarea {
     font-size: 0.72rem;
 }
 
+/* === AJOUTS V5 : PONT WORKER GOOGLE COLAB (TESLA T4 15 Go VRAM) === */
+.colab-bridge-box {
+    margin-top: 12px;
+    background: #090e1a;
+    border: 1px solid #38bdf8;
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+.colab-bridge-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+    color: #38bdf8;
+}
+
+.colab-pill-free {
+    background: #064e3b;
+    border: 1px solid #10b981;
+    color: #a7f3d0;
+    padding: 1px 8px;
+    border-radius: 12px;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.colab-token-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 5px;
+    align-items: center;
+}
+
+.colab-token-row input {
+    font-family: monospace;
+    font-size: 0.76rem;
+    color: #fde047;
+}
+
+.colab-help-note {
+    margin: 8px 0 0 0;
+    font-size: 0.73rem;
+    color: #94a3b8;
+    line-height: 1.4;
+}
+
+

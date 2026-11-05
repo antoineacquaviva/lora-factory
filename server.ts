@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { spawn, spawnSync } from 'child_process';
 import express, { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
@@ -19,6 +20,12 @@ const LOG_FILE = path.join(BASE_DIR, 'training.log');
 const PID_FILE = path.join(BASE_DIR, 'training.pid');
 const GEMINI_KEY_FILE = path.join(BASE_DIR, '.gemini_key');
 const GEMINI_MODEL_FILE = path.join(BASE_DIR, '.gemini_model');
+const RUNPOD_KEY_FILE = path.join(BASE_DIR, '.runpod_key');
+const RUNPOD_GPU_FILE = path.join(BASE_DIR, '.runpod_gpu');
+const COLAB_TOKEN_FILE = path.join(BASE_DIR, '.colab_token');
+const COLAB_JOB_FILE = path.join(BASE_DIR, 'colab_job.json');
+
+
 
 for (const dir of [ORIGINALS_DIR, DATASET_DIR, MODELS_DIR, SCRIPTS_DIR]) {
   fs.mkdirSync(dir, { recursive: true });
@@ -49,12 +56,87 @@ app.use('/static', express.static(path.join(BASE_DIR, 'static')));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
+const modelDiskStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    fs.mkdirSync(MODELS_DIR, { recursive: true });
+    cb(null, MODELS_DIR);
+  },
+  filename: (_req, file, cb) => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+    const orig = secureFilename(file.originalname || '');
+    const finalName = orig.endsWith('.safetensors') && !orig.includes('filtre_culturel_v1')
+      ? orig
+      : `filtre_culturel_colab_${ts}.safetensors`;
+    cb(null, finalName);
+  },
+});
+const modelUpload = multer({
+  storage: modelDiskStorage,
+  limits: { fileSize: 1024 * 1024 * 1024 }, // 1 Go max pour les .safetensors SDXL
+});
+
+interface ColabJobState {
+  jobId: string;
+  status: 'IDLE' | 'WAITING_FOR_COLAB' | 'RUNNING_ON_COLAB' | 'COMPLETED' | 'ABORTED';
+  steps: number;
+  lr: string;
+  dim: number;
+  trigger: string;
+  lowVram: boolean;
+  createdAt: number;
+  updatedAt: number;
+  abortRequested: boolean;
+}
+
+function getColabJobState(): ColabJobState {
+  if (fs.existsSync(COLAB_JOB_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(COLAB_JOB_FILE, 'utf-8'));
+    } catch {
+      // ignore
+    }
+  }
+  return {
+    jobId: '',
+    status: 'IDLE',
+    steps: 1200,
+    lr: '1e-4',
+    dim: 32,
+    trigger: 'culturax_style',
+    lowVram: true,
+    createdAt: 0,
+    updatedAt: 0,
+    abortRequested: false,
+  };
+}
+
+function saveColabJobState(state: ColabJobState): void {
+  state.updatedAt = Date.now();
+  fs.writeFileSync(COLAB_JOB_FILE, JSON.stringify(state, null, 2), 'utf-8');
+}
+
+function getOrCreateColabToken(forceRegenerate = false): string {
+  if (!forceRegenerate) {
+    const envTok = (process.env.COLAB_BRIDGE_TOKEN || '').trim();
+    if (envTok) return envTok;
+    if (fs.existsSync(COLAB_TOKEN_FILE)) {
+      const saved = fs.readFileSync(COLAB_TOKEN_FILE, 'utf-8').trim();
+      if (saved) return saved;
+    }
+  }
+  const newToken = `cb_${crypto.randomBytes(20).toString('hex')}`;
+  fs.writeFileSync(COLAB_TOKEN_FILE, newToken, { encoding: 'utf-8', mode: 0o600 });
+  return newToken;
+}
+
 function secureFilename(filename: string): string {
   const base = path.basename(filename || '');
   return base.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-function isRunning(): boolean {
+function isLocalPidRunning(): boolean {
   if (!fs.existsSync(PID_FILE)) return false;
   try {
     const pid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim(), 10);
@@ -64,6 +146,12 @@ function isRunning(): boolean {
   } catch {
     return false;
   }
+}
+
+function isRunning(): boolean {
+  if (isLocalPidRunning()) return true;
+  const colabJob = getColabJobState();
+  return colabJob.status === 'WAITING_FOR_COLAB' || colabJob.status === 'RUNNING_ON_COLAB';
 }
 
 function loadTagsConfig(): Record<string, Array<{ fr: string; en: string }>> {
@@ -93,6 +181,24 @@ function getGeminiModel(): string {
     if (m) return m;
   }
   return (process.env.GEMINI_MODEL || 'gemini-3.8-flash').trim();
+}
+
+function getRunpodApiKey(): string {
+  if (fs.existsSync(RUNPOD_KEY_FILE)) {
+    const fileKey = fs.readFileSync(RUNPOD_KEY_FILE, 'utf-8').trim();
+    if (fileKey) return fileKey;
+  }
+  const envKey = (process.env.RUNPOD_API_KEY || '').trim();
+  if (envKey) return envKey;
+  return '';
+}
+
+function getRunpodGpu(): string {
+  if (fs.existsSync(RUNPOD_GPU_FILE)) {
+    const g = fs.readFileSync(RUNPOD_GPU_FILE, 'utf-8').trim();
+    if (g) return g;
+  }
+  return (process.env.RUNPOD_GPU || 'AUTO').trim();
 }
 
 function splitSubtags(tagStr: string): string[] {
@@ -362,12 +468,18 @@ app.get('/api/state', async (_req: Request, res: Response) => {
           .map(({ name, size_mb, date }) => ({ name, size_mb, date }))
       : [];
 
+    const colabJob = getColabJobState();
+
     res.json({
       dataset: items,
       models: modelFiles,
       tags_config: loadTagsConfig(),
       has_gemini_key: Boolean(getGeminiApiKey()),
       gemini_model: getGeminiModel(),
+      has_runpod_key: Boolean(getRunpodApiKey()),
+      runpod_gpu: getRunpodGpu(),
+      colab_token: getOrCreateColabToken(),
+      colab_job: colabJob,
     });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
@@ -393,6 +505,28 @@ app.post('/api/gemini_key', (req: Request, res: Response) => {
     status: 'ok',
     has_gemini_key: Boolean(getGeminiApiKey()),
     gemini_model: getGeminiModel(),
+  });
+});
+
+app.post('/api/runpod_key', (req: Request, res: Response) => {
+  const data = req.body || {};
+  const key = (data.api_key || '').trim();
+  const gpu = (data.gpu || '').trim();
+
+  if (key) {
+    fs.writeFileSync(RUNPOD_KEY_FILE, key, { encoding: 'utf-8', mode: 0o600 });
+  } else if (data.clear_key && fs.existsSync(RUNPOD_KEY_FILE)) {
+    fs.unlinkSync(RUNPOD_KEY_FILE);
+  }
+
+  if (gpu) {
+    fs.writeFileSync(RUNPOD_GPU_FILE, gpu, 'utf-8');
+  }
+
+  res.json({
+    status: 'ok',
+    has_runpod_key: Boolean(getRunpodApiKey()),
+    runpod_gpu: getRunpodGpu(),
   });
 });
 
@@ -1132,19 +1266,432 @@ app.delete('/api/delete/:filename', (req: Request, res: Response) => {
   res.json({ status: 'deleted' });
 });
 
-// RÈGLE 4 : Conservation des scripts d'entraînement GPU (`scripts/orchestrate.py` & `scripts/kill_switch.py`)
+function createFlatDatasetZip(outZipPath = '/tmp/dataset.zip'): number {
+  const pyScript = `
+import zipfile
+from pathlib import Path
+src = Path(${JSON.stringify(DATASET_DIR)})
+out = Path(${JSON.stringify(outZipPath)})
+files = [f for f in sorted(src.iterdir()) if f.is_file()]
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+    for f in files:
+        zf.write(f, arcname=f.name)
+print(len(files))
+`;
+  const r = spawnSync('/usr/bin/python3', ['-c', pyScript], { encoding: 'utf-8' });
+  if (r.status !== 0 || !fs.existsSync(outZipPath)) {
+    throw new Error(`Échec de compression de ${outZipPath}: ${r.stderr || ''}`);
+  }
+  return parseInt((r.stdout || '0').trim(), 10) || 0;
+}
+
+// Middleware d'authentification Bearer pour le pont Google Colab
+function requireColabAuth(req: Request, res: Response, next: NextFunction) {
+  const expectedToken = getOrCreateColabToken();
+  const authHeader = String(req.headers.authorization || '').trim();
+  let providedToken = '';
+  if (authHeader.toLowerCase().startsWith('bearer ')) {
+    providedToken = authHeader.slice(7).trim();
+  } else if (typeof req.query.token === 'string') {
+    providedToken = req.query.token.trim();
+  }
+
+  if (!providedToken || providedToken !== expectedToken) {
+    return res.status(401).json({ error: 'Jeton COLAB_BRIDGE_TOKEN invalide ou manquant.' });
+  }
+  next();
+}
+
+app.post('/api/colab/regenerate_token', (_req: Request, res: Response) => {
+  const tok = getOrCreateColabToken(true);
+  res.json({ status: 'ok', colab_token: tok });
+});
+
+// 1. Poll du job en attente par Google Colab
+app.get('/api/colab/poll', requireColabAuth, (_req: Request, res: Response) => {
+  const job = getColabJobState();
+  const waiting = job.status === 'WAITING_FOR_COLAB' && !job.abortRequested;
+  res.json({
+    waiting,
+    status: job.status,
+    job_id: job.jobId,
+    steps: job.steps,
+    lr: job.lr,
+    dim: job.dim,
+    trigger: job.trigger,
+    low_vram: true,
+    abort: Boolean(job.abortRequested || job.status === 'ABORTED'),
+  });
+});
+
+// 2. Téléchargement du dataset.zip par Google Colab
+app.get('/api/colab/dataset.zip', requireColabAuth, (_req: Request, res: Response) => {
+  try {
+    const zipPath = '/tmp/dataset.zip';
+    if (!fs.existsSync(zipPath)) {
+      createFlatDatasetZip(zipPath);
+    }
+    const job = getColabJobState();
+    if (job.status === 'WAITING_FOR_COLAB') {
+      job.status = 'RUNNING_ON_COLAB';
+      saveColabJobState(job);
+      fs.appendFileSync(
+        LOG_FILE,
+        `\n[+] Worker Google Colab (Tesla T4) connecté ! Téléchargement de dataset.zip en cours...\n`,
+        'utf-8'
+      );
+    }
+    res.download(zipPath, 'dataset.zip');
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+// 3. Téléchargement du script gpu_worker_run.sh configuré Low-VRAM T4
+app.get('/api/colab/worker_script.sh', requireColabAuth, (_req: Request, res: Response) => {
+  const scriptPath = path.join(SCRIPTS_DIR, 'gpu_worker_run.sh');
+  if (!fs.existsSync(scriptPath)) {
+    return res.status(404).send('Script gpu_worker_run.sh introuvable');
+  }
+  const content = fs.readFileSync(scriptPath, 'utf-8').replace(/\r\n/g, '\n');
+  res.setHeader('Content-Type', 'text/x-shellscript; charset=utf-8');
+  res.send(content);
+});
+
+// 4. Réception des logs en streaming depuis Google Colab + réponse coupe-circuit (abort)
+app.post('/api/colab/logs', requireColabAuth, (req: Request, res: Response) => {
+  const data = req.body || {};
+  let textToAppend = '';
+  if (Array.isArray(data.logs)) {
+    textToAppend = data.logs.join('\n') + '\n';
+  } else if (typeof data.logs === 'string' && data.logs) {
+    textToAppend = data.logs.endsWith('\n') ? data.logs : data.logs + '\n';
+  } else if (typeof data.line === 'string' && data.line) {
+    textToAppend = data.line.endsWith('\n') ? data.line : data.line + '\n';
+  }
+
+  if (textToAppend) {
+    fs.appendFileSync(LOG_FILE, textToAppend, 'utf-8');
+  }
+
+  const job = getColabJobState();
+  const shouldAbort = Boolean(job.abortRequested || job.status === 'ABORTED');
+  res.json({ status: 'ok', abort: shouldAbort });
+});
+
+// 5. Réception du fichier .safetensors final envoyé par Google Colab
+app.post(
+  '/api/colab/upload_model',
+  requireColabAuth,
+  modelUpload.single('file'),
+  (req: Request, res: Response) => {
+    try {
+      const uploadedFile = req.file;
+      if (!uploadedFile) {
+        return res.status(400).json({ error: 'Aucun fichier .safetensors reçu' });
+      }
+      const sizeMb = Math.round((uploadedFile.size / (1024 * 1024)) * 10) / 10;
+      const job = getColabJobState();
+      job.status = 'COMPLETED';
+      job.abortRequested = false;
+      saveColabJobState(job);
+
+      fs.appendFileSync(
+        LOG_FILE,
+        `\n[+] SUCCÈS TOTAL (Google Colab Tesla T4) ! Modèle LoRA reçu et sauvegardé : ${uploadedFile.filename} (${sizeMb} Mo)\n`,
+        'utf-8'
+      );
+
+      res.json({
+        status: 'ok',
+        model: uploadedFile.filename,
+        size_mb: sizeMb,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || String(err) });
+    }
+  }
+);
+
+// 6. Génération dynamique du Notebook lora_studio_colab_worker.ipynb
+app.get('/api/colab/notebook', (req: Request, res: Response) => {
+  const token = getOrCreateColabToken();
+  const rawStudioUrl = String(req.query.studio_url || '').trim().replace(/\/+$/, '');
+  const fallbackOrigin = `${req.protocol}://${req.get('host') || 'localhost:3000'}`;
+  const studioUrl = rawStudioUrl || fallbackOrigin;
+
+  const cell1Source = [
+    '# === CELLULE 1 : Vérification du GPU Tesla T4 (15 Go VRAM) ===\n',
+    '!nvidia-smi\n',
+    'import subprocess, sys\n',
+    'res = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"], capture_output=True, text=True)\n',
+    'if res.returncode != 0 or not res.stdout.strip():\n',
+    '    raise RuntimeError("❌ Aucun GPU détecté ! Dans Google Colab, allez dans Exécution > Modifier le type d\'exécution > Accélérateur matériel : T4 GPU.")\n',
+    'print(f"✅ GPU actif et prêt pour SDXL Low-VRAM : {res.stdout.strip()}")\n',
+  ];
+
+  const cell2Source = [
+    '# === CELLULE 2 : Pré-installation rapide et mise en cache de Kohya sd-scripts (Compatible CUDA 12 Colab) ===\n',
+    'import os, subprocess\n',
+    'os.makedirs("/tmp/lora_work", exist_ok=True)\n',
+    'if not os.path.exists("/tmp/lora_work/sd-scripts"):\n',
+    '    print("⏳ Clonage de Kohya sd-scripts...")\n',
+    '    subprocess.run(["git", "clone", "--depth", "1", "-q", "https://github.com/kohya-ss/sd-scripts.git", "/tmp/lora_work/sd-scripts"], check=True)\n',
+    'print("⏳ Installation des dépendances Kohya compatibles avec le PyTorch CUDA de Colab (~45s)...")\n',
+    'subprocess.run(["pip", "install", "-q", "accelerate", "transformers", "diffusers", "safetensors", "bitsandbytes", "dadaptation", "prodigyopt", "lion-pytorch", "toml", "voluptuous", "imagesize", "huggingface_hub"], check=True)\n',
+    'subprocess.run(["pip", "install", "-q", "-r", "/tmp/lora_work/sd-scripts/requirements.txt"], check=False)\n',
+    'print("✅ Environnement Kohya SDXL prêt !")\n',
+  ];
+
+  const cell3Source = [
+    '# === CELLULE 3 : Pont Worker Colab <-> LoRA Factory Studio ===\n',
+    'import os, sys, time, json, signal, subprocess, urllib.request, urllib.error\n',
+    '\n',
+    `STUDIO_URL = ${JSON.stringify(studioUrl)}\n`,
+    `COLAB_BRIDGE_TOKEN = ${JSON.stringify(token)}\n`,
+    '\n',
+    'HEADERS = {\n',
+    '    "Authorization": f"Bearer {COLAB_BRIDGE_TOKEN}",\n',
+    '    "User-Agent": "LoRA-Factory-Colab-Worker/1.0"\n',
+    '}\n',
+    '\n',
+    'def api_get_json(endpoint):\n',
+    '    req = urllib.request.Request(f"{STUDIO_URL}/{endpoint.lstrip(\'/\')}", headers=HEADERS)\n',
+    '    with urllib.request.urlopen(req, timeout=30) as r:\n',
+    '        return json.loads(r.read().decode("utf-8"))\n',
+    '\n',
+    'def api_download(endpoint, dest_path):\n',
+    '    req = urllib.request.Request(f"{STUDIO_URL}/{endpoint.lstrip(\'/\')}", headers=HEADERS)\n',
+    '    with urllib.request.urlopen(req, timeout=120) as r, open(dest_path, "wb") as f:\n',
+    '        while True:\n',
+    '            chunk = r.read(65536)\n',
+    '            if not chunk:\n',
+    '                break\n',
+    '            f.write(chunk)\n',
+    '\n',
+    'def api_send_logs(lines):\n',
+    '    if not lines:\n',
+    '        return False\n',
+    '    data = json.dumps({"logs": lines}).encode("utf-8")\n',
+    '    hdrs = {**HEADERS, "Content-Type": "application/json"}\n',
+    '    req = urllib.request.Request(f"{STUDIO_URL}/api/colab/logs", data=data, headers=hdrs, method="POST")\n',
+    '    try:\n',
+    '        with urllib.request.urlopen(req, timeout=15) as r:\n',
+    '            ans = json.loads(r.read().decode("utf-8"))\n',
+    '            return bool(ans.get("abort"))\n',
+    '    except Exception as e:\n',
+    '        print(f"[Warn log push] {e}")\n',
+    '        return False\n',
+    '\n',
+    'def upload_safetensors(filepath):\n',
+    '    boundary = "----LoRAStudioColabBoundary987654321"\n',
+    '    filename = os.path.basename(filepath)\n',
+    '    with open(filepath, "rb") as f:\n',
+    '        file_bytes = f.read()\n',
+    '    head = (\n',
+    '        f"--{boundary}\\r\\n"\n',
+    '        f"Content-Disposition: form-data; name=\\"file\\"; filename=\\"{filename}\\"\\r\\n"\n',
+    '        f"Content-Type: application/octet-stream\\r\\n\\r\\n"\n',
+    '    ).encode("utf-8")\n',
+    '    tail = f"\\r\\n--{boundary}--\\r\\n".encode("utf-8")\n',
+    '    body = head + file_bytes + tail\n',
+    '    hdrs = {**HEADERS, "Content-Type": f"multipart/form-data; boundary={boundary}", "Content-Length": str(len(body))}\n',
+    '    req = urllib.request.Request(f"{STUDIO_URL}/api/colab/upload_model", data=body, headers=hdrs, method="POST")\n',
+    '    with urllib.request.urlopen(req, timeout=300) as r:\n',
+    '        return json.loads(r.read().decode("utf-8"))\n',
+    '\n',
+    'print(f"🔌 Connexion au Studio : {STUDIO_URL}")\n',
+    'print("⏳ Attente d\'un job d\'entraînement en état WAITING_FOR_COLAB (cliquez sur \'Lancer l\'entraînement GPU\' dans le Studio)...")\n',
+    '\n',
+    'job = None\n',
+    'while True:\n',
+    '    try:\n',
+    '        state = api_get_json("api/colab/poll")\n',
+    '        if state.get("waiting"):\n',
+    '            job = state\n',
+    '            break\n',
+    '        time.sleep(4)\n',
+    '    except KeyboardInterrupt:\n',
+    '        raise\n',
+    '    except Exception as e:\n',
+    '        print(f"⚠️ Erreur de connexion au Studio ({e}), nouvelle tentative dans 6s...")\n',
+    '        time.sleep(6)\n',
+    '\n',
+    'steps = str(job.get("steps", 1200))\n',
+    'lr = str(job.get("lr", "1e-4"))\n',
+    'dim = str(job.get("dim", 32))\n',
+    'trigger = str(job.get("trigger", "culturax_style"))\n',
+    'print(f"🚀 Job détecté ! Trigger={trigger} | Steps={steps} | LR={lr} | Dim={dim}")\n',
+    '\n',
+    'print("📥 Téléchargement de dataset.zip et du script Low-VRAM T4...")\n',
+    'api_download("api/colab/dataset.zip", "/tmp/dataset.zip")\n',
+    'api_download("api/colab/worker_script.sh", "/tmp/gpu_worker_run.sh")\n',
+    'os.chmod("/tmp/gpu_worker_run.sh", 0o755)\n',
+    '\n',
+    'cmd = ["/bin/bash", "/tmp/gpu_worker_run.sh", steps, lr, dim, trigger, "--low-vram"]\n',
+    'proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, preexec_fn=os.setsid)\n',
+    '\n',
+    'buffer = []\n',
+    'last_Send = time.time()\n',
+    'aborted = False\n',
+    '\n',
+    'for line in iter(proc.stdout.readline, ""):\n',
+    '    sys.stdout.write(line)\n',
+    '    sys.stdout.flush()\n',
+    '    buffer.append(line.rstrip("\\r\\n"))\n',
+    '    if len(buffer) >= 8 or (time.time() - last_Send) > 1.5:\n',
+    '        if api_send_logs(buffer):\n',
+    '            print("\\n🛑 COUPE-CIRCUIT (Kill Switch) reçu depuis le Studio ! Arrêt immédiat...")\n',
+    '            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)\n',
+    '            aborted = True\n',
+    '            break\n',
+    '        buffer = []\n',
+    '        last_Send = time.time()\n',
+    '\n',
+    'if buffer and not aborted:\n',
+    '    api_send_logs(buffer)\n',
+    '\n',
+    'ret = proc.wait()\n',
+    'output_model = "/tmp/lora_work/output/filtre_culturel_v1.safetensors"\n',
+    '\n',
+    'if not aborted and ret == 0 and os.path.exists(output_model):\n',
+    '    print("📤 Envoi du modèle .safetensors vers votre LoRA Factory Studio...")\n',
+    '    api_send_logs(["[*] Entraînement terminé sur Colab ! Transfert du fichier .safetensors vers le Studio..."])\n',
+    '    res_up = upload_safetensors(output_model)\n',
+    '    print(f"✅ Modèle transféré avec succès : {res_up}")\n',
+    'else:\n',
+    '    if not aborted:\n',
+    '        api_send_logs([f"[!] Échec du script d\'entraînement sur Colab (code retour: {ret})."])\n',
+    '\n',
+    'print("🔌 Libération automatique de la session GPU Google Colab...")\n',
+    'try:\n',
+    '    from google.colab import runtime\n',
+    '    runtime.unassign()\n',
+    'except Exception:\n',
+    '    pass\n',
+  ];
+
+  const notebookJson = {
+    nbformat: 4,
+    nbformat_minor: 5,
+    metadata: {
+      colab: {
+        provenance: [],
+        gpuType: 'T4',
+      },
+      accelerator: 'GPU',
+      gpuClass: 'standard',
+      kernelspec: {
+        name: 'python3',
+        display_name: 'Python 3',
+      },
+      language_info: {
+        name: 'python',
+      },
+    },
+    cells: [
+      {
+        cell_type: 'markdown',
+        metadata: {},
+        source: [
+          '# ⚡ LoRA Factory Studio — Worker GPU Google Colab (Tesla T4 15 Go)\n',
+          'Ce notebook connecte gratuitement une carte **NVIDIA Tesla T4 (15 Go VRAM)** de Google Colab à votre **LoRA Factory Studio**.\n',
+          '1. Assurez-vous que le runtime est bien en **GPU T4** (*Exécution > Modifier le type d\'exécution > T4 GPU*).\n',
+          '2. Exécutez les 3 cellules ci-dessous (*Exécution > Tout exécuter*).\n',
+        ],
+      },
+      {
+        cell_type: 'code',
+        execution_count: null,
+        metadata: {},
+        outputs: [],
+        source: cell1Source,
+      },
+      {
+        cell_type: 'code',
+        execution_count: null,
+        metadata: {},
+        outputs: [],
+        source: cell2Source,
+      },
+      {
+        cell_type: 'code',
+        execution_count: null,
+        metadata: {},
+        outputs: [],
+        source: cell3Source,
+      },
+    ],
+  };
+
+  res.setHeader('Content-Type', 'application/x-ipynb+json; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="lora_studio_colab_worker.ipynb"');
+  res.send(JSON.stringify(notebookJson, null, 2));
+});
+
+// RÈGLE 4 : Conservation des scripts d'entraînement GPU (`scripts/orchestrate.py` & `scripts/kill_switch.py`) + Mode Pont Google Colab
 app.post('/api/train', (req: Request, res: Response) => {
   if (isRunning()) {
-    return res.status(400).json({ error: 'Un entraînement est déjà en cours !' });
+    return res.status(400).json({ error: 'Un entraînement est déjà en cours ou en attente !' });
   }
   const data = req.body || {};
+  const provider = String(data.provider || 'runpod').toLowerCase();
+  const steps = parseInt(String(data.steps || 1200), 10);
+  const lr = String(data.lr || '1e-4');
+  const dim = parseInt(String(data.dim || 32), 10);
+  const trigger = String(data.trigger || 'culturax_style').trim();
+
+  if (provider === 'colab') {
+    try {
+      const filesCount = createFlatDatasetZip('/tmp/dataset.zip');
+      if (filesCount === 0) {
+        return res.status(400).json({ error: 'Le dossier dataset est vide ! Importez des images.' });
+      }
+      const job: ColabJobState = {
+        jobId: `colab_${Date.now()}`,
+        status: 'WAITING_FOR_COLAB',
+        steps,
+        lr,
+        dim,
+        trigger,
+        lowVram: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        abortRequested: false,
+      };
+      saveColabJobState(job);
+
+      const initLog = [
+        `=== [MODE PONT GOOGLE COLAB — TESLA T4 15 Go VRAM] ===`,
+        `[*] Archive /tmp/dataset.zip préparée avec succès (${filesCount} fichiers : images + labels .txt).`,
+        `[*] Paramètres Kohya Low-VRAM T4 : Trigger="${trigger}" | Steps=${steps} | LR=${lr} | Dim=${dim} | Batch=1 | Adafactor FP16 | Cache Text Encoder & Latents.`,
+        `[*] État du job : WAITING_FOR_COLAB`,
+        `    -> 1. Téléchargez le Notebook 'lora_studio_colab_worker.ipynb' depuis la colonne de gauche.`,
+        `    -> 2. Ouvrez-le dans Google Colab (https://colab.research.google.com) avec l'accélérateur T4 GPU.`,
+        `    -> 3. Cliquez sur 'Tout exécuter' : Colab va récupérer ce job automatiquement et streamer les logs ici en direct !\n`,
+      ].join('\n');
+      fs.writeFileSync(LOG_FILE, initLog, 'utf-8');
+
+      return res.json({ status: 'waiting_for_colab', job_id: job.jobId });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || String(err) });
+    }
+  }
+
+  const gpuChoice = String(data.gpu || getRunpodGpu() || 'AUTO').trim();
+  if (gpuChoice) {
+    fs.writeFileSync(RUNPOD_GPU_FILE, gpuChoice, 'utf-8');
+  }
+
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PYTHONUNBUFFERED: '1',
-    LORA_STEPS: String(parseInt(String(data.steps || 1200), 10)),
-    LORA_LR: String(data.lr || '1e-4'),
-    LORA_DIM: String(parseInt(String(data.dim || 32), 10)),
-    LORA_TRIGGER: String(data.trigger || 'culturax_style').trim(),
+    LORA_STEPS: String(steps),
+    LORA_LR: lr,
+    LORA_DIM: String(dim),
+    LORA_TRIGGER: trigger,
+    RUNPOD_API_KEY: getRunpodApiKey(),
+    RUNPOD_GPU: gpuChoice,
   };
 
   const logFd = fs.openSync(LOG_FILE, 'w');
@@ -1163,7 +1710,7 @@ app.post('/api/train', (req: Request, res: Response) => {
 });
 
 app.post('/api/kill', (_req: Request, res: Response) => {
-  if (isRunning()) {
+  if (isLocalPidRunning()) {
     try {
       const pid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim(), 10);
       process.kill(pid, 'SIGKILL');
@@ -1171,18 +1718,60 @@ app.post('/api/kill', (_req: Request, res: Response) => {
       // ignore
     }
   }
+
+  const colabJob = getColabJobState();
+  if (colabJob.status === 'WAITING_FOR_COLAB' || colabJob.status === 'RUNNING_ON_COLAB') {
+    colabJob.abortRequested = true;
+    colabJob.status = 'ABORTED';
+    saveColabJobState(colabJob);
+    fs.appendFileSync(
+      LOG_FILE,
+      "\n[!] SIGNAL D'ARRÊT D'URGENCE ENVOYÉ AU WORKER GOOGLE COLAB (arrêt du processus Kohya & déconnexion du runtime T4)...\n",
+      'utf-8'
+    );
+  }
+
   fs.appendFileSync(
     LOG_FILE,
     "\n[!] COUPE-CIRCUIT D'URGENCE ACTIVÉ DEPUIS LE STUDIO WEB...\n",
     'utf-8'
   );
   const logFd = fs.openSync(LOG_FILE, 'a');
-  spawnSync('/usr/bin/python3', [path.join(SCRIPTS_DIR, 'kill_switch.py')], {
+  spawnSync('/usr/bin/python3', [path.join(SCRIPTS_DIR, 'kill_switch.py'), '--force'], {
+    env: {
+      ...process.env,
+      RUNPOD_API_KEY: getRunpodApiKey(),
+    },
     stdio: ['ignore', logFd, logFd],
   });
   fs.closeSync(logFd);
 
   res.json({ status: 'killed' });
+});
+
+app.get('/api/export_dataset', (req: Request, res: Response) => {
+  try {
+    const trigger = secureFilename(String(req.query.trigger || 'culturax_style').trim() || 'culturax_style');
+    const outZip = '/tmp/dataset_kohya_export.zip';
+    const pyScript = `
+import zipfile
+from pathlib import Path
+src = Path(${JSON.stringify(DATASET_DIR)})
+out = Path(${JSON.stringify(outZip)})
+folder = f"10_${trigger}"
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+    for f in sorted(src.iterdir()):
+        if f.is_file():
+            zf.write(f, arcname=f"{folder}/{f.name}")
+`;
+    const r = spawnSync('/usr/bin/python3', ['-c', pyScript]);
+    if (r.status !== 0 || !fs.existsSync(outZip)) {
+      return res.status(500).json({ error: 'Erreur lors de la création de l’archive .zip' });
+    }
+    res.download(outZip, `dataset_lora_${trigger}.zip`);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
 });
 
 app.get('/api/logs', (_req: Request, res: Response) => {
@@ -1191,7 +1780,12 @@ app.get('/api/logs', (_req: Request, res: Response) => {
     const raw = fs.readFileSync(LOG_FILE, 'utf-8');
     logs = raw.slice(-18000);
   }
-  res.json({ running: isRunning(), logs });
+  const colabJob = getColabJobState();
+  res.json({
+    running: isRunning(),
+    colab_status: colabJob.status,
+    logs,
+  });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
