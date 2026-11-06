@@ -1376,6 +1376,14 @@ app.post('/api/colab/logs', requireColabAuth, (req: Request, res: Response) => {
 
   const job = getColabJobState();
   const shouldAbort = Boolean(job.abortRequested || job.status === 'ABORTED');
+
+  // Si le script sur Colab a échoué (hors coupe-circuit), on remet le job en WAITING_FOR_COLAB
+  // afin que l'utilisateur puisse relancer la Cellule 3 immédiatement sans perdre le job
+  if (data.failed === true && !shouldAbort) {
+    job.status = 'WAITING_FOR_COLAB';
+    saveColabJobState(job);
+  }
+
   res.json({ status: 'ok', abort: shouldAbort });
 });
 
@@ -1452,7 +1460,7 @@ app.get('/api/colab/notebook', (req: Request, res: Response) => {
     '\n',
     'HEADERS = {\n',
     '    "Authorization": f"Bearer {COLAB_BRIDGE_TOKEN}",\n',
-    '    "User-Agent": "LoRA-Factory-Colab-Worker/1.0"\n',
+    '    "User-Agent": "LoRA-Factory-Colab-Worker/1.1"\n',
     '}\n',
     '\n',
     'def api_get_json(endpoint):\n',
@@ -1469,10 +1477,13 @@ app.get('/api/colab/notebook', (req: Request, res: Response) => {
     '                break\n',
     '            f.write(chunk)\n',
     '\n',
-    'def api_send_logs(lines):\n',
-    '    if not lines:\n',
+    'def api_send_logs(lines, failed=False):\n',
+    '    if not lines and not failed:\n',
     '        return False\n',
-    '    data = json.dumps({"logs": lines}).encode("utf-8")\n',
+    '    payload = {"logs": lines}\n',
+    '    if failed:\n',
+    '        payload["failed"] = True\n',
+    '    data = json.dumps(payload).encode("utf-8")\n',
     '    hdrs = {**HEADERS, "Content-Type": "application/json"}\n',
     '    req = urllib.request.Request(f"{STUDIO_URL}/api/colab/logs", data=data, headers=hdrs, method="POST")\n',
     '    try:\n',
@@ -1559,16 +1570,23 @@ app.get('/api/colab/notebook', (req: Request, res: Response) => {
     '    api_send_logs(["[*] Entraînement terminé sur Colab ! Transfert du fichier .safetensors vers le Studio..."])\n',
     '    res_up = upload_safetensors(output_model)\n',
     '    print(f"✅ Modèle transféré avec succès : {res_up}")\n',
+    '    print("🔌 Libération automatique de la session GPU Google Colab...")\n',
+    '    try:\n',
+    '        from google.colab import runtime\n',
+    '        runtime.unassign()\n',
+    '    except Exception:\n',
+    '        pass\n',
+    'elif aborted:\n',
+    '    print("🔌 Coupe-circuit activé depuis le Studio : libération de la session GPU Google Colab...")\n',
+    '    try:\n',
+    '        from google.colab import runtime\n',
+    '        runtime.unassign()\n',
+    '    except Exception:\n',
+    '        pass\n',
     'else:\n',
-    '    if not aborted:\n',
-    '        api_send_logs([f"[!] Échec du script d\'entraînement sur Colab (code retour: {ret})."])\n',
-    '\n',
-    'print("🔌 Libération automatique de la session GPU Google Colab...")\n',
-    'try:\n',
-    '    from google.colab import runtime\n',
-    '    runtime.unassign()\n',
-    'except Exception:\n',
-    '    pass\n',
+    '    api_send_logs([f"[!] Échec du script d\'entraînement sur Colab (code retour: {ret}). La session Colab reste ouverte (modèle SDXL 6.9 Go conservé en cache) et le job est prêt à être relancé."], failed=True)\n',
+    '    print(f"⚠️ Le script s\'est arrêté avec le code {ret}. La session Colab N\'EST PAS détruite afin de conserver le modèle SDXL (6.9 Go) et les paquets en cache.")\n',
+    '    print("👉 Vous pouvez relancer uniquement cette Cellule 3 pour réessayer immédiatement !")\n',
   ];
 
   const notebookJson = {

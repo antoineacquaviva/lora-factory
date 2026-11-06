@@ -78,13 +78,17 @@ fi
 
 echo "=== [4/4] Lancement du Fine-Tuning SDXL LoRA ==="
 if [ "$LOW_VRAM_MODE" -eq 1 ]; then
-    # Profil optimisé Tesla T4 (15 Go VRAM) : Adafactor + Cache Text Encoder + Cache Latents + Batch 1 + FP16
+    # Profil optimisé Tesla T4 (15 Go VRAM / 12.7 Go RAM Système Colab) :
+    # --lowram : charge les poids SDXL directement en VRAM GPU sans saturer les 12.7 Go de RAM CPU (évite SIGKILL: 9)
+    # --max_data_loader_n_workers=0 : évite la duplication mémoire des sous-processus Python sur Colab
+    # --caption_extension=".txt" : lit les fichiers de labels .txt générés par le Studio
     accelerate launch --num_cpu_threads_per_process 2 sdxl_train_network.py \
         --pretrained_model_name_or_path="/tmp/lora_work/models/sd_xl_base_1.0.safetensors" \
         --train_data_dir="/tmp/lora_work/dataset" \
         --output_dir="/tmp/lora_work/output" \
         --output_name="filtre_culturel_v1" \
         --save_model_as="safetensors" \
+        --caption_extension=".txt" \
         --resolution="1024,1024" \
         --enable_bucket \
         --train_batch_size=1 \
@@ -101,11 +105,12 @@ if [ "$LOW_VRAM_MODE" -eq 1 ]; then
         --network_dim=$DIM \
         --network_alpha=$((DIM / 2)) \
         --gradient_checkpointing \
+        --lowram \
         $ATTN_ARG \
         --cache_latents \
         --cache_latents_to_disk \
         --cache_text_encoder_outputs \
-        --max_data_loader_n_workers=1
+        --max_data_loader_n_workers=0
 else
     # Profil standard 24 Go+ VRAM (RTX 4090 / A5000 / 3090 / A10)
     accelerate launch --num_cpu_threads_per_process 4 sdxl_train_network.py \
@@ -114,6 +119,7 @@ else
         --output_dir="/tmp/lora_work/output" \
         --output_name="filtre_culturel_v1" \
         --save_model_as="safetensors" \
+        --caption_extension=".txt" \
         --resolution="1024,1024" \
         --enable_bucket \
         --train_batch_size=2 \
